@@ -211,10 +211,13 @@ def generate_content_for_opportunity(opp_id: int):
     opp = dict(row)
     pkg = generator_agent.generate_package(opp["title"], opp["description"])
 
+    titles_str = json.dumps(pkg["titles"]) if isinstance(pkg["titles"], list) else str(pkg["titles"])
+    tags_str = json.dumps(pkg["tags"]) if isinstance(pkg["tags"], list) else str(pkg["tags"])
+
     cursor.execute("""
     INSERT INTO content_packages (opportunity_id, titles, selected_title_index, hook, script, description, tags, short_script, linkedin_post, x_thread, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (opp_id, pkg["titles"], pkg["selected_title_index"], pkg["hook"], pkg["script"], pkg["description"], pkg["tags"], pkg["short_script"], pkg["linkedin_post"], pkg["x_thread"], pkg["status"]))
+    """, (opp_id, titles_str, pkg.get("selected_title_index", 0), pkg.get("hook", ""), pkg.get("script", ""), pkg.get("description", ""), tags_str, pkg.get("short_script", ""), pkg.get("linkedin_post", ""), pkg.get("x_thread", ""), pkg.get("status", "draft")))
     
     pkg_id = cursor.lastrowid
     conn.commit()
