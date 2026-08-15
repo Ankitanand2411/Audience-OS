@@ -10,7 +10,7 @@ class ContentStudioAgent:
     """
 
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY_GENERATOR") or os.getenv("GROQ_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY_GENERATOR") or os.getenv("GROQ_API_KEY_2") or os.getenv("GROQ_API_KEY")
 
     def generate_package(self, opportunity_title: str, opportunity_desc: str) -> Dict[str, Any]:
         if self.groq_api_key:
