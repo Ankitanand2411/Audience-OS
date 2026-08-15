@@ -15,7 +15,7 @@ class CommentClassifierAgent:
     """
 
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY_CLASSIFIER") or os.getenv("GROQ_API_KEY")
 
     def _call_groq(self, comments: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         try:

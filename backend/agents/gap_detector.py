@@ -18,7 +18,7 @@ class ContentGapDetectorAgent:
     ]
 
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY_GAP_DETECTOR") or os.getenv("GROQ_API_KEY")
 
     def detect_gaps(self, classified_comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if self.groq_api_key:

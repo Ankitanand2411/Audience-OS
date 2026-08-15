@@ -26,7 +26,7 @@ class OpportunityScorerAgent:
     }
 
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY_SCORER") or os.getenv("GROQ_API_KEY")
 
     def score_opportunities(self, gap_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if self.groq_api_key:
