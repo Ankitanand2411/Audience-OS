@@ -1,0 +1,27 @@
+# Root Gitignore
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.sqlite3
+
+# Node & dependencies
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs and secrets
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+.env.*.local
+.DS_Store
+setup.sh
