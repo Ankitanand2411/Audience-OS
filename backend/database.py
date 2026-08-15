@@ -2,28 +2,32 @@ import sqlite3
 import json
 import os
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DB_PATH = os.path.join(os.path.dirname(__file__), "audienceos.db")
 
 def get_db():
     if DATABASE_URL and DATABASE_URL.startswith("postgres"):
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-        # Standardize postgresql:// connection scheme
-        url = DATABASE_URL.replace("postgres://", "postgresql://")
-        conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
-        return conn
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            url = DATABASE_URL.replace("postgres://", "postgresql://")
+            conn = psycopg2.connect(url, cursor_factory=RealDictCursor, connect_timeout=3)
+            return conn
+        except Exception as e:
+            print(f"[Database Warning] Could not connect to Cloud PostgreSQL ({e}). Using local SQLite database.")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
 
-    is_postgres = bool(DATABASE_URL and DATABASE_URL.startswith("postgres"))
+    is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
     pk_auto = "SERIAL PRIMARY KEY" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
     cursor.execute(f"""
@@ -149,10 +153,11 @@ def seed_if_empty():
             ("Building with FastAPI + LangChain", "Growing demand for a practical guide on integrating LangChain agents with FastAPI for production deployments.", 78, 62, "+14%", "Medium", "Tutorial Series", 0),
             ("Local LLM Setup Guide", "Viewers want to know how to run LLMs locally with Ollama, vLLM, and llama.cpp for development and privacy.", 72, 54, "+11%", "Medium", "How-to Video", 0)
         ]
+        is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
         cursor.executemany("""
         INSERT INTO opportunities (title, description, score, questions, growth, coverage, format, trending)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """ if DATABASE_URL and DATABASE_URL.startswith("postgres") else """
+        """ if is_postgres else """
         INSERT INTO opportunities (title, description, score, questions, growth, coverage, format, trending)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, opps)
@@ -160,7 +165,7 @@ def seed_if_empty():
     cursor.execute("SELECT COUNT(*) FROM comments")
     res = cursor.fetchone()
     count = res[0] if res else 0
-    
+
     if count == 0:
         cmts = [
             ('SK', 'Can you explain how AI agents actually work? Like the difference between tool-calling and autonomous agents?', 'REQUEST', 'AI Agents', 'High', '2 hours ago'),
@@ -172,10 +177,11 @@ def seed_if_empty():
             ('NR', 'I keep getting bad results with my RAG pipeline. Chunking seems wrong but I don\'t know how to fix it.', 'CONFUSION', 'RAG', 'High', '1 day ago'),
             ('VT', 'Great content on LangChain! Can you cover LangGraph next? The documentation is really confusing.', 'FEEDBACK', 'LangChain', 'Low', '2 days ago')
         ]
+        is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
         cursor.executemany("""
         INSERT INTO comments (author_avatar, text, comment_type, topic, priority, time_ago)
         VALUES (%s, %s, %s, %s, %s, %s)
-        """ if DATABASE_URL and DATABASE_URL.startswith("postgres") else """
+        """ if is_postgres else """
         INSERT INTO comments (author_avatar, text, comment_type, topic, priority, time_ago)
         VALUES (?, ?, ?, ?, ?, ?)
         """, cmts)
