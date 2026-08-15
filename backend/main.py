@@ -64,27 +64,37 @@ def get_dashboard():
     # Channel info
     cursor.execute("SELECT * FROM channels LIMIT 1")
     channel_row = cursor.fetchone()
-    channel = dict(channel_row) if channel_row else {}
+    channel = dict(channel_row) if channel_row else {"name": "Creator", "channel_name": "@MKBHD"}
 
     # Opportunities
     cursor.execute("SELECT * FROM opportunities ORDER BY score DESC LIMIT 5")
     opps = [dict(r) for r in cursor.fetchall()]
 
     # Recent Comments
-    cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 4")
+    cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 5")
     comments = [dict(r) for r in cursor.fetchall()]
 
     # Topics
-    cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC LIMIT 3")
+    cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC LIMIT 5")
     top_topics = [dict(r) for r in cursor.fetchall()]
+
+    # Real Dynamic Counts
+    cursor.execute("SELECT COUNT(*) FROM comments")
+    total_comments = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM topics")
+    total_topics = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM opportunities WHERE score >= 80")
+    high_priority = cursor.fetchone()[0]
 
     conn.close()
 
     kpi = [
-        {"label": "Comments Analyzed", "value": "8,421", "trend": "+12% this month", "up": True, "icon": "message-square"},
-        {"label": "Topics Discovered", "value": "127", "trend": "18 new this week", "up": True, "icon": "layers"},
-        {"label": "Content Gaps", "value": "23", "trend": "7 high priority", "up": None, "icon": "target"},
-        {"label": "High-Priority Opportunities", "value": str(len([o for o in opps if o["score"] >= 80])), "trend": "3 trending now", "up": True, "icon": "trending-up"}
+        {"label": "Comments Analyzed", "value": f"{total_comments:,}", "trend": "Live from YouTube API", "up": True, "icon": "message-square"},
+        {"label": "Topics Discovered", "value": str(total_topics), "trend": "Discovered by AI Agent", "up": True, "icon": "layers"},
+        {"label": "Content Gaps", "value": str(max(1, len(top_topics))), "trend": "High priority gaps", "up": None, "icon": "target"},
+        {"label": "High-Priority Opportunities", "value": str(high_priority), "trend": "Score >= 80", "up": True, "icon": "trending-up"}
     ]
 
     return {
@@ -97,23 +107,39 @@ def get_dashboard():
 
 @app.post("/api/analyze")
 def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: Optional[str] = Query(None)):
+    conn = get_db()
+    cursor = conn.cursor()
+
     # Read connected channel from DB if not explicitly passed
     if not channel_handle:
-        conn = get_db()
-        cursor = conn.cursor()
         cursor.execute("SELECT channel_name FROM channels LIMIT 1")
         row = cursor.fetchone()
         if row:
             channel_handle = row["channel_name"] if isinstance(row, dict) else row[0]
-        conn.close()
+        else:
+            channel_handle = "@MKBHD"
 
-    raw_comments = youtube_service.fetch_channel_comments(channel_handle=channel_handle, range_type=range_type)
+    clean_handle = channel_handle.strip()
+    channel_title = clean_handle.lstrip('@').capitalize()
+
+    # Update or insert channel in DB
+    cursor.execute("DELETE FROM channels")
+    cursor.execute("""
+    INSERT INTO channels (name, channel_name, avatar)
+    VALUES (?, ?, ?)
+    """, (channel_title, clean_handle, clean_handle[0:2].upper()))
+
+    # Fetch live comments from YouTube Data API
+    raw_comments = youtube_service.fetch_channel_comments(channel_handle=clean_handle, range_type=range_type)
     classified = classifier_agent.process_batch(raw_comments)
     gaps = gap_detector_agent.detect_gaps(classified)
     ranked_opps = scorer_agent.score_opportunities(gaps)
 
-    conn = get_db()
-    cursor = conn.cursor()
+    # Clear old data so dashboard shows ONLY the new channel data
+    cursor.execute("DELETE FROM comments")
+    cursor.execute("DELETE FROM topics")
+    cursor.execute("DELETE FROM opportunities")
+    cursor.execute("DELETE FROM content_packages")
 
     for c in classified:
         cursor.execute("""
@@ -125,8 +151,6 @@ def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: O
         cursor.execute("""
         INSERT INTO topics (name, interactions, growth, demand, coverage, opportunity)
         VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET
-        interactions=excluded.interactions, growth=excluded.growth, demand=excluded.demand, coverage=excluded.coverage, opportunity=excluded.opportunity
         """, (g["name"], g["interactions"], g["growth"], g["demand"], g["coverage"], g["demand"]))
 
     for o in ranked_opps:
@@ -139,7 +163,8 @@ def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: O
     conn.close()
 
     return {
-        "message": "Analysis completed successfully",
+        "message": f"Successfully analyzed {clean_handle}",
+        "channel": clean_handle,
         "processed_comments": len(classified),
         "discovered_topics": len(gaps),
         "new_opportunities": len(ranked_opps)
