@@ -10,7 +10,7 @@ export function renderOpportunities(apiData) {
     <div class="page-header">
       <h1 class="page-title">Content Opportunities</h1>
       <p class="page-desc">Turn audience demand into your next piece of content (Analyzed & Ranked by Opportunity Scorer Agent).</p>
-      <div class="page-actions"><button class="btn btn-primary" onclick="window.location.reload()"><i data-lucide="refresh-cw"></i>Analyze Latest Data</button></div>
+      <div class="page-actions"><button class="btn btn-primary" onclick="_navigate('dashboard')"><i data-lucide="refresh-cw"></i>Re-Analyze Channel</button></div>
     </div>
 
     <section class="section">

@@ -23,7 +23,6 @@ const NAV_ITEMS = [
 ];
 const BOTTOM_NAV = [
   { id: 'settings', label: 'Settings', icon: 'settings' },
-  { id: 'help', label: 'Help', icon: 'help-circle' },
 ];
 
 let currentPage = 'dashboard';
@@ -32,6 +31,13 @@ let isOnboarded = localStorage.getItem('aos_onboarded') === 'true';
 let sidebarOpen = false;
 let pageStateData = null;
 
+// Live channel state — populated from API, replaces all DEMO_CHANNEL usage
+let currentChannel = {
+  name: localStorage.getItem('aos_channel_name') || 'Creator',
+  channelName: localStorage.getItem('aos_channel_handle') || '',
+  avatar: localStorage.getItem('aos_channel_avatar') || 'C',
+};
+
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
@@ -39,30 +45,10 @@ function getGreeting() {
   return 'Good evening';
 }
 
-function getChannelInfo() {
-  const dbChannel = pageStateData?.channel;
-  if (dbChannel && dbChannel.channel_name) {
-    const handle = dbChannel.channel_name;
-    const name = dbChannel.name || handle.lstrip ? handle.lstrip('@') : handle.replace('@', '');
-    const avatar = dbChannel.avatar || (handle ? handle.replace('@', '')[0].toUpperCase() : 'C');
-    return { name, channelName: handle, avatar };
-  }
-
-  const storedHandle = localStorage.getItem('aos_channel_handle') || '@MKBHD';
-  const storedName = localStorage.getItem('aos_creator_name') || storedHandle.replace('@', '');
-  return {
-    name: storedName,
-    channelName: storedHandle,
-    avatar: storedHandle.replace('@', '')[0].toUpperCase()
-  };
-}
-
 async function navigateTo(page, id) {
   currentPage = page;
   detailId = id || null;
   sidebarOpen = false;
-
-  // Load async backend data if needed
   pageStateData = await loadPageData(page, id);
   render();
   window.scrollTo(0, 0);
@@ -71,28 +57,33 @@ window._navigate = navigateTo;
 
 async function loadPageData(page, id) {
   switch (page) {
-    case 'dashboard':
-      return await api.getDashboard();
-    case 'audience':
-      return await api.getAudience();
-    case 'opportunities':
-      return await api.getOpportunities();
-    case 'opportunity-detail':
-      return await api.getOpportunityDetail(id || 1);
-    case 'content-studio':
-      return await api.getContentStudio();
-    case 'calendar':
-      return await api.getCalendar();
-    case 'analytics':
-      return await api.getAnalytics();
-    default:
-      return null;
+    case 'dashboard': {
+      const data = await api.getDashboard();
+      // Sync live channel from API into local state
+      if (data?.channel?.name) {
+        currentChannel = {
+          name: data.channel.name,
+          channelName: data.channel.channel_name || '',
+          avatar: data.channel.avatar || data.channel.name[0] || 'C',
+        };
+        localStorage.setItem('aos_channel_name', currentChannel.name);
+        localStorage.setItem('aos_channel_handle', currentChannel.channelName);
+        localStorage.setItem('aos_channel_avatar', currentChannel.avatar);
+      }
+      return data;
+    }
+    case 'audience':      return await api.getAudience();
+    case 'opportunities': return await api.getOpportunities();
+    case 'opportunity-detail': return await api.getOpportunityDetail(id || 1);
+    case 'content-studio': return await api.getContentStudio();
+    case 'calendar':      return await api.getCalendar();
+    case 'analytics':     return await api.getAnalytics();
+    default: return null;
   }
 }
 
 function renderSidebar() {
-  const channel = getChannelInfo();
-
+  const ch = currentChannel;
   return `
   <aside class="sidebar ${sidebarOpen ? 'open' : ''}" id="sidebar">
     <div class="sidebar-brand">
@@ -117,10 +108,10 @@ function renderSidebar() {
         </button>
       `).join('')}
       <div class="sidebar-profile" onclick="_navigate('settings')">
-        <div class="sidebar-profile-avatar">${channel.avatar}</div>
+        <div class="sidebar-profile-avatar">${ch.avatar}</div>
         <div class="sidebar-profile-info">
-          <div class="sidebar-profile-name">${channel.name}</div>
-          <div class="sidebar-profile-channel">${channel.channelName}</div>
+          <div class="sidebar-profile-name">${ch.name}</div>
+          <div class="sidebar-profile-channel">${ch.channelName || 'No channel connected'}</div>
         </div>
       </div>
     </div>
@@ -135,8 +126,8 @@ function getPageTitle() {
 }
 
 function renderTopbar() {
-  const channel = getChannelInfo();
-
+  const ch = currentChannel;
+  const isConnected = !!ch.channelName;
   return `
   <header class="topbar">
     <div class="topbar-left">
@@ -144,32 +135,30 @@ function renderTopbar() {
       <span class="topbar-title">${getPageTitle()}</span>
     </div>
     <div class="topbar-right">
-      <div class="topbar-yt-status">
-        <span class="topbar-yt-dot"></span>
-        <span>YouTube Connected (${channel.channelName})</span>
+      <div class="topbar-yt-status" style="opacity:${isConnected ? 1 : 0.4}">
+        <span class="topbar-yt-dot" style="background:${isConnected ? 'var(--color-success)' : 'var(--color-error)'}"></span>
+        <span>${isConnected ? ch.channelName + ' Connected' : 'No Channel Connected'}</span>
       </div>
       <button class="topbar-icon-btn" aria-label="Notifications" id="btn-notifs">
         <i data-lucide="bell"></i>
-        <span class="topbar-notif-dot"></span>
+        ${isConnected ? '<span class="topbar-notif-dot"></span>' : ''}
       </button>
-      <div class="topbar-avatar" title="${channel.name}">${channel.avatar}</div>
+      <div class="topbar-avatar" title="${ch.name}">${ch.avatar}</div>
     </div>
   </header>`;
 }
 
 function renderPageContent() {
-  const channel = getChannelInfo();
-
   switch (currentPage) {
-    case 'dashboard': return renderDashboard(getGreeting(), channel, pageStateData);
-    case 'audience': return renderAudience(pageStateData);
-    case 'opportunities': return renderOpportunities(pageStateData);
+    case 'dashboard':          return renderDashboard(getGreeting(), currentChannel, pageStateData);
+    case 'audience':           return renderAudience(pageStateData);
+    case 'opportunities':      return renderOpportunities(pageStateData);
     case 'opportunity-detail': return renderOpportunityDetail(detailId, pageStateData);
-    case 'content-studio': return renderContentStudio(pageStateData);
-    case 'calendar': return renderCalendar(pageStateData);
-    case 'analytics': return renderAnalytics(pageStateData);
-    case 'settings': return renderSettings(channel);
-    default: return renderDashboard(getGreeting(), channel, pageStateData);
+    case 'content-studio':     return renderContentStudio(pageStateData);
+    case 'calendar':           return renderCalendar(pageStateData);
+    case 'analytics':          return renderAnalytics(pageStateData);
+    case 'settings':           return renderSettings(currentChannel);
+    default:                   return renderDashboard(getGreeting(), currentChannel, pageStateData);
   }
 }
 
@@ -196,7 +185,7 @@ function render() {
     <div class="toast-container" id="toast-container"></div>
     <div class="generating-overlay" id="generating-overlay">
       <div class="generating-card">
-        <div class="generating-title">Generating your content package</div>
+        <div class="generating-title">Generating content with Groq AI Agent</div>
         <div class="progress-steps" id="gen-steps"></div>
       </div>
     </div>
@@ -231,102 +220,166 @@ function attachOnboardingEvents() {
   const analyzeBtn = document.getElementById('onboard-analyze');
   if (analyzeBtn) analyzeBtn.addEventListener('click', async () => {
     const channelInput = document.getElementById('onboard-channel-input');
-    const channelHandle = channelInput ? channelInput.value.trim() : '@MKBHD';
+    const channelHandle = channelInput ? channelInput.value.trim() : '';
+
+    if (!channelHandle) {
+      channelInput.style.border = '1px solid var(--color-error)';
+      channelInput.placeholder = 'Please enter a channel handle (e.g. @MKBHD)';
+      return;
+    }
+
     const step2 = document.getElementById('onboard-step-2');
     const step3 = document.getElementById('onboard-step-3');
-    if (step2 && step3) {
-      step2.classList.remove('active');
-      step3.classList.add('active');
-      
-      localStorage.setItem('aos_channel_handle', channelHandle);
-      localStorage.setItem('aos_creator_name', channelHandle.replace('@', ''));
+    if (!step2 || !step3) return;
 
-      await api.runAnalysis("Last 30 days", channelHandle);
-      await api.saveSettings({ name: channelHandle.replace('@', ''), channel_name: channelHandle });
-      
+    step2.classList.remove('active');
+    step3.classList.add('active');
+
+    // Run the actual analysis — this populates the DB with real YouTube data
+    const analysisPromise = api.runAnalysis('Last 30 days', channelHandle);
+
+    // Animate progress steps in parallel while we wait for API
+    animateSteps('#onboard-step-3 .progress-step', async () => {
+      await analysisPromise;
       isOnboarded = true;
       localStorage.setItem('aos_onboarded', 'true');
-      await navigateTo('dashboard');
-    }
+      // Load real data then render — currentChannel will be set from API
+      pageStateData = await loadPageData('dashboard');
+      render();
+    });
   });
 }
 
-function simulateAnalysis() {
-  const steps = document.querySelectorAll('#onboard-step-3 .progress-step');
+function animateSteps(selector, onComplete) {
+  const steps = document.querySelectorAll(selector);
   let i = 0;
   const interval = setInterval(() => {
     if (i < steps.length) {
-      if (i > 0) { steps[i-1].classList.remove('active'); steps[i-1].classList.add('done'); steps[i-1].querySelector('.progress-step-icon').textContent = '✓'; }
-      steps[i].classList.remove('pending'); steps[i].classList.add('active'); steps[i].querySelector('.progress-step-icon').textContent = '●';
+      if (i > 0) {
+        steps[i-1].classList.remove('active');
+        steps[i-1].classList.add('done');
+        steps[i-1].querySelector('.progress-step-icon').textContent = '✓';
+      }
+      steps[i].classList.remove('pending');
+      steps[i].classList.add('active');
+      steps[i].querySelector('.progress-step-icon').textContent = '●';
       i++;
     } else {
+      steps[steps.length-1].classList.remove('active');
+      steps[steps.length-1].classList.add('done');
+      steps[steps.length-1].querySelector('.progress-step-icon').textContent = '✓';
       clearInterval(interval);
+      setTimeout(onComplete, 500);
     }
-  }, 500);
+  }, 700);
 }
 
 function attachEvents() {
   const menuBtn = document.getElementById('mobile-menu-btn');
   const overlay = document.getElementById('sidebar-overlay');
-  if (menuBtn) menuBtn.addEventListener('click', () => { sidebarOpen = !sidebarOpen; document.getElementById('sidebar').classList.toggle('open', sidebarOpen); overlay.classList.toggle('active', sidebarOpen); });
-  if (overlay) overlay.addEventListener('click', () => { sidebarOpen = false; document.getElementById('sidebar').classList.remove('open'); overlay.classList.remove('active'); });
+  if (menuBtn) menuBtn.addEventListener('click', () => {
+    sidebarOpen = !sidebarOpen;
+    document.getElementById('sidebar').classList.toggle('open', sidebarOpen);
+    overlay.classList.toggle('active', sidebarOpen);
+  });
+  if (overlay) overlay.addEventListener('click', () => {
+    sidebarOpen = false;
+    document.getElementById('sidebar').classList.remove('open');
+    overlay.classList.remove('active');
+  });
 
+  // Dashboard "Run Live Analysis" button
   const runLiveBtn = document.getElementById('btn-run-live-analysis');
   if (runLiveBtn) {
     runLiveBtn.addEventListener('click', async () => {
       const handleInput = document.getElementById('live-channel-input');
       const channelHandle = handleInput ? handleInput.value.trim() : '';
-      
-      runLiveBtn.disabled = true;
-      runLiveBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Fetching Live YouTube Comments...`;
-      if (typeof lucide !== 'undefined') lucide.createIcons();
-      showToast(`Connecting to YouTube API for ${channelHandle || 'channel'}...`);
 
-      localStorage.setItem('aos_channel_handle', channelHandle);
-      localStorage.setItem('aos_creator_name', channelHandle.replace('@', ''));
-
-      const result = await api.runAnalysis("Last 30 days", channelHandle);
-      
-      if (result) {
-        showToast(`Analyzed ${result.processed_comments || 0} live comments! Found ${result.new_opportunities || 0} new opportunities.`);
-      } else {
-        showToast(`Analysis completed for ${channelHandle}!`);
+      if (!channelHandle) {
+        showToast('Please enter a YouTube channel handle first.');
+        return;
       }
 
-      pageStateData = await loadPageData(currentPage);
+      runLiveBtn.disabled = true;
+      runLiveBtn.innerHTML = '<i data-lucide="loader-2"></i> Fetching Live Comments...';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      showToast(`Connecting to YouTube API for ${channelHandle}...`);
+
+      const result = await api.runAnalysis('Last 30 days', channelHandle);
+
+      if (result) {
+        showToast(`Analyzed ${result.processed_comments || 0} real comments · ${result.new_opportunities || 0} opportunities found`);
+      } else {
+        showToast('Analysis failed — check the backend logs.');
+      }
+
+      // Reload dashboard with fresh live data (this also syncs currentChannel)
+      pageStateData = await loadPageData('dashboard');
       render();
+    });
+  }
+
+  // Settings "Re-analyze" button
+  const reanalyzeBtn = document.getElementById('btn-reanalyze-channel');
+  if (reanalyzeBtn) {
+    reanalyzeBtn.addEventListener('click', async () => {
+      const input = document.getElementById('settings-channel-input');
+      const handle = input ? input.value.trim() : currentChannel.channelName;
+      if (!handle) return;
+      reanalyzeBtn.disabled = true;
+      reanalyzeBtn.textContent = 'Analyzing...';
+      await api.runAnalysis('Last 30 days', handle);
+      pageStateData = await loadPageData('dashboard');
+      showToast(`Channel switched to ${handle} — dashboard updated!`);
+      await navigateTo('dashboard');
     });
   }
 }
 
-// Content generation simulation calling FastAPI ContentStudioAgent
+// Content generation — calls Groq ContentStudioAgent
 window._generateContent = async function(oppId) {
   const overlay = document.getElementById('generating-overlay');
   const stepsEl = document.getElementById('gen-steps');
-  const genSteps = ['Analyzing audience intent', 'Selecting content angle', 'Writing the script', 'Creating platform variants', 'Preparing metadata'];
-  stepsEl.innerHTML = genSteps.map((s, i) => `<div class="progress-step ${i === 0 ? 'active' : 'pending'}"><span class="progress-step-icon">${i === 0 ? '●' : '○'}</span><span class="progress-step-text">${s}</span></div>`).join('');
+  const genSteps = [
+    'Analyzing audience intent',
+    'Selecting content angle',
+    'Writing the script',
+    'Creating platform variants',
+    'Preparing metadata',
+  ];
+  stepsEl.innerHTML = genSteps.map((s, i) => `
+    <div class="progress-step ${i === 0 ? 'active' : 'pending'}">
+      <span class="progress-step-icon">${i === 0 ? '●' : '○'}</span>
+      <span class="progress-step-text">${s}</span>
+    </div>
+  `).join('');
   overlay.classList.add('active');
-  
-  // Call backend generation agent in parallel
+
   const genPromise = api.generateContentPackage(oppId);
 
   let i = 1;
   const interval = setInterval(async () => {
     const allSteps = stepsEl.querySelectorAll('.progress-step');
     if (i <= genSteps.length) {
-      allSteps[i-1].classList.remove('active'); allSteps[i-1].classList.add('done'); allSteps[i-1].querySelector('.progress-step-icon').textContent = '✓';
-      if (i < genSteps.length) { allSteps[i].classList.remove('pending'); allSteps[i].classList.add('active'); allSteps[i].querySelector('.progress-step-icon').textContent = '●'; }
+      allSteps[i-1].classList.remove('active');
+      allSteps[i-1].classList.add('done');
+      allSteps[i-1].querySelector('.progress-step-icon').textContent = '✓';
+      if (i < genSteps.length) {
+        allSteps[i].classList.remove('pending');
+        allSteps[i].classList.add('active');
+        allSteps[i].querySelector('.progress-step-icon').textContent = '●';
+      }
       i++;
     } else {
       clearInterval(interval);
-      const pkgResult = await genPromise;
+      await genPromise;
       setTimeout(async () => {
         overlay.classList.remove('active');
         await navigateTo('content-studio');
-        showToast('New Content Package generated by Groq AI Agent!');
-      }, 600);
+        showToast('Script generated by Groq AI Agent!');
+      }, 500);
     }
-  }, 600);
+  }, 700);
 };
 
 window._showToast = showToast;
@@ -338,7 +391,7 @@ function showToast(msg) {
   t.innerHTML = `<i data-lucide="check-circle" style="width:16px;height:16px;color:var(--color-success)"></i>${msg}`;
   c.appendChild(t);
   if (typeof lucide !== 'undefined') lucide.createIcons();
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(() => t.remove(), 4000);
 }
 
 // Initial load
