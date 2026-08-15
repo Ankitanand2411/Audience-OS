@@ -11,7 +11,6 @@ import { renderCalendar } from './pages/calendar.js';
 import { renderAnalytics } from './pages/analytics.js';
 import { renderSettings } from './pages/settings.js';
 import { renderOnboarding } from './pages/onboarding.js';
-import { DEMO_CHANNEL } from './data/demo.js';
 import { api } from './api/client.js';
 
 const NAV_ITEMS = [
@@ -38,6 +37,24 @@ function getGreeting() {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+function getChannelInfo() {
+  const dbChannel = pageStateData?.channel;
+  if (dbChannel && dbChannel.channel_name) {
+    const handle = dbChannel.channel_name;
+    const name = dbChannel.name || handle.lstrip ? handle.lstrip('@') : handle.replace('@', '');
+    const avatar = dbChannel.avatar || (handle ? handle.replace('@', '')[0].toUpperCase() : 'C');
+    return { name, channelName: handle, avatar };
+  }
+
+  const storedHandle = localStorage.getItem('aos_channel_handle') || '@MKBHD';
+  const storedName = localStorage.getItem('aos_creator_name') || storedHandle.replace('@', '');
+  return {
+    name: storedName,
+    channelName: storedHandle,
+    avatar: storedHandle.replace('@', '')[0].toUpperCase()
+  };
 }
 
 async function navigateTo(page, id) {
@@ -74,6 +91,8 @@ async function loadPageData(page, id) {
 }
 
 function renderSidebar() {
+  const channel = getChannelInfo();
+
   return `
   <aside class="sidebar ${sidebarOpen ? 'open' : ''}" id="sidebar">
     <div class="sidebar-brand">
@@ -98,10 +117,10 @@ function renderSidebar() {
         </button>
       `).join('')}
       <div class="sidebar-profile" onclick="_navigate('settings')">
-        <div class="sidebar-profile-avatar">${DEMO_CHANNEL.avatar}</div>
+        <div class="sidebar-profile-avatar">${channel.avatar}</div>
         <div class="sidebar-profile-info">
-          <div class="sidebar-profile-name">${DEMO_CHANNEL.name}</div>
-          <div class="sidebar-profile-channel">${DEMO_CHANNEL.channelName}</div>
+          <div class="sidebar-profile-name">${channel.name}</div>
+          <div class="sidebar-profile-channel">${channel.channelName}</div>
         </div>
       </div>
     </div>
@@ -116,6 +135,8 @@ function getPageTitle() {
 }
 
 function renderTopbar() {
+  const channel = getChannelInfo();
+
   return `
   <header class="topbar">
     <div class="topbar-left">
@@ -125,28 +146,30 @@ function renderTopbar() {
     <div class="topbar-right">
       <div class="topbar-yt-status">
         <span class="topbar-yt-dot"></span>
-        <span>YouTube Connected</span>
+        <span>YouTube Connected (${channel.channelName})</span>
       </div>
       <button class="topbar-icon-btn" aria-label="Notifications" id="btn-notifs">
         <i data-lucide="bell"></i>
         <span class="topbar-notif-dot"></span>
       </button>
-      <div class="topbar-avatar" title="${DEMO_CHANNEL.name}">${DEMO_CHANNEL.avatar}</div>
+      <div class="topbar-avatar" title="${channel.name}">${channel.avatar}</div>
     </div>
   </header>`;
 }
 
 function renderPageContent() {
+  const channel = getChannelInfo();
+
   switch (currentPage) {
-    case 'dashboard': return renderDashboard(getGreeting(), DEMO_CHANNEL, pageStateData);
+    case 'dashboard': return renderDashboard(getGreeting(), channel, pageStateData);
     case 'audience': return renderAudience(pageStateData);
     case 'opportunities': return renderOpportunities(pageStateData);
     case 'opportunity-detail': return renderOpportunityDetail(detailId, pageStateData);
     case 'content-studio': return renderContentStudio(pageStateData);
     case 'calendar': return renderCalendar(pageStateData);
     case 'analytics': return renderAnalytics(pageStateData);
-    case 'settings': return renderSettings(DEMO_CHANNEL);
-    default: return renderDashboard(getGreeting(), DEMO_CHANNEL, pageStateData);
+    case 'settings': return renderSettings(channel);
+    default: return renderDashboard(getGreeting(), channel, pageStateData);
   }
 }
 
@@ -192,7 +215,11 @@ function attachOnboardingEvents() {
   });
 
   const demoBtn = document.getElementById('onboard-demo');
-  if (demoBtn) demoBtn.addEventListener('click', () => { isOnboarded = true; localStorage.setItem('aos_onboarded', 'true'); navigateTo('dashboard'); });
+  if (demoBtn) demoBtn.addEventListener('click', () => {
+    isOnboarded = true;
+    localStorage.setItem('aos_onboarded', 'true');
+    navigateTo('dashboard');
+  });
 
   const connectBtn = document.getElementById('onboard-connect');
   if (connectBtn) connectBtn.addEventListener('click', () => {
@@ -210,9 +237,16 @@ function attachOnboardingEvents() {
     if (step2 && step3) {
       step2.classList.remove('active');
       step3.classList.add('active');
-      simulateAnalysis();
+      
+      localStorage.setItem('aos_channel_handle', channelHandle);
+      localStorage.setItem('aos_creator_name', channelHandle.replace('@', ''));
+
       await api.runAnalysis("Last 30 days", channelHandle);
-      await api.saveSettings({ name: 'Creator', channel_name: channelHandle });
+      await api.saveSettings({ name: channelHandle.replace('@', ''), channel_name: channelHandle });
+      
+      isOnboarded = true;
+      localStorage.setItem('aos_onboarded', 'true');
+      await navigateTo('dashboard');
     }
   });
 }
@@ -226,11 +260,9 @@ function simulateAnalysis() {
       steps[i].classList.remove('pending'); steps[i].classList.add('active'); steps[i].querySelector('.progress-step-icon').textContent = '●';
       i++;
     } else {
-      steps[steps.length-1].classList.remove('active'); steps[steps.length-1].classList.add('done'); steps[steps.length-1].querySelector('.progress-step-icon').textContent = '✓';
       clearInterval(interval);
-      setTimeout(() => { isOnboarded = true; localStorage.setItem('aos_onboarded', 'true'); navigateTo('dashboard'); }, 800);
     }
-  }, 600);
+  }, 500);
 }
 
 function attachEvents() {
@@ -249,6 +281,9 @@ function attachEvents() {
       runLiveBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Fetching Live YouTube Comments...`;
       if (typeof lucide !== 'undefined') lucide.createIcons();
       showToast(`Connecting to YouTube API for ${channelHandle || 'channel'}...`);
+
+      localStorage.setItem('aos_channel_handle', channelHandle);
+      localStorage.setItem('aos_creator_name', channelHandle.replace('@', ''));
 
       const result = await api.runAnalysis("Last 30 days", channelHandle);
       

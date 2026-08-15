@@ -2,17 +2,23 @@ import { api } from '../api/client.js';
 
 export function renderSettings(channel) {
   window._saveChannelSettings = async function() {
-    const nameVal = document.getElementById('settings-name-input').value;
-    const channelVal = document.getElementById('settings-channel-input').value;
+    const nameVal = document.getElementById('settings-name-input').value.trim();
+    const channelVal = document.getElementById('settings-channel-input').value.trim();
+
+    localStorage.setItem('aos_creator_name', nameVal);
+    localStorage.setItem('aos_channel_handle', channelVal);
 
     await api.saveSettings({ name: nameVal, channel_name: channelVal });
-    _showToast('Channel settings saved to backend!');
+    await api.runAnalysis("Last 30 days", channelVal);
+    
+    _showToast(`Settings saved & analyzed live comments for ${channelVal}!`);
+    if (window._navigate) window._navigate('dashboard');
   };
 
   return `
     <div class="page-header">
       <h1 class="page-title">Settings</h1>
-      <p class="page-desc">Manage your account and channel connection.</p>
+      <p class="page-desc">Manage your account and YouTube channel connection.</p>
     </div>
 
     <section class="section">
@@ -33,16 +39,16 @@ export function renderSettings(channel) {
 
     <section class="section">
       <div class="card">
-        <h3 class="card-title" style="margin-bottom:var(--space-5)">Channel Profile</h3>
+        <h3 class="card-title" style="margin-bottom:var(--space-5)">Creator & Channel Profile</h3>
         <div class="input-group" style="max-width:400px;margin-bottom:var(--space-4)">
           <label class="input-label">Creator Name</label>
           <input class="input" id="settings-name-input" value="${channel.name}" />
         </div>
         <div class="input-group" style="max-width:400px;margin-bottom:var(--space-5)">
-          <label class="input-label">Channel Name or Handle</label>
-          <input class="input" id="settings-channel-input" value="${channel.channelName}" />
+          <label class="input-label">YouTube Channel Name or Handle</label>
+          <input class="input" id="settings-channel-input" value="${channel.channelName}" placeholder="e.g. @MKBHD or https://youtube.com/@mkbhd" />
         </div>
-        <button class="btn btn-primary btn-sm" onclick="_saveChannelSettings()"><i data-lucide="save"></i>Save Changes</button>
+        <button class="btn btn-primary btn-sm" onclick="_saveChannelSettings()"><i data-lucide="save"></i>Save & Fetch Live YouTube Comments</button>
       </div>
     </section>
 
@@ -58,14 +64,6 @@ export function renderSettings(channel) {
             <option>Last 90 days</option>
           </select>
         </div>
-        <div class="input-group" style="max-width:400px">
-          <label class="input-label">Content Language</label>
-          <select class="input" style="padding:var(--space-2) var(--space-3)">
-            <option selected>English</option>
-            <option>Hindi</option>
-            <option>Spanish</option>
-          </select>
-        </div>
       </div>
     </section>
 
@@ -74,8 +72,8 @@ export function renderSettings(channel) {
         <h3 class="card-title" style="color:var(--color-error);margin-bottom:var(--space-3)">Danger Zone</h3>
         <p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-bottom:var(--space-4)">Disconnect your YouTube channel or reset all analysis data.</p>
         <div style="display:flex;gap:var(--space-3)">
-          <button class="btn btn-secondary btn-sm">Disconnect YouTube</button>
-          <button class="btn btn-danger btn-sm">Reset Data</button>
+          <button class="btn btn-secondary btn-sm" onclick="localStorage.removeItem('aos_onboarded'); window.location.reload();">Reset Onboarding</button>
+          <button class="btn btn-danger btn-sm" onclick="localStorage.clear(); window.location.reload();">Reset All Data</button>
         </div>
       </div>
     </section>
