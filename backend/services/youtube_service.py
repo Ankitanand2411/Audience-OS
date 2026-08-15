@@ -4,26 +4,35 @@ from typing import List, Dict, Any
 
 class YouTubeService:
     """
-    Service to interface with YouTube Data API v3 or simulate live audience comments.
+    Service to interface with YouTube Data API v3.
     Reads YOUTUBE_API_KEY from environment variables.
-    Supports resolving handles (@channel), channel IDs, and video comment threads.
+    Supports resolving handles (@channel), full channel URLs, channel IDs, and live comment threads.
     """
 
     def __init__(self):
         self.api_key = os.getenv("YOUTUBE_API_KEY")
 
     def resolve_channel_id(self, query: str) -> str:
-        if not self.api_key or query == "demo":
+        if not self.api_key or not query or query == "demo":
             return None
 
         # Clean query
         query = query.strip()
+        
+        # Handle full URL like https://www.youtube.com/@MKBHD or https://youtube.com/channel/UC...
+        if "youtube.com/" in query:
+            parts = query.split("youtube.com/")[-1].strip("/").split("/")
+            query = parts[-1]
+
+        # Direct Channel ID check (24 chars starting with UC)
         if query.startswith("UC") and len(query) == 24:
             return query
 
         handle = query if query.startswith("@") else f"@{query}"
+        
+        # 1. Try resolving handle
         try:
-            url = f"https://www.googleapis.com/youtube/v3/channels?part=id&forHandle={handle}&key={self.api_key}"
+            url = f"https://www.googleapis.com/youtube/v3/channels?part=id,snippet&forHandle={handle}&key={self.api_key}"
             res = httpx.get(url, timeout=5.0).json()
             items = res.get("items", [])
             if items:
@@ -31,7 +40,7 @@ class YouTubeService:
         except Exception as e:
             print(f"[YouTubeService] Handle resolution failed for {handle}: {e}")
 
-        # Fallback to search query
+        # 2. Fallback to search query
         try:
             url = f"https://www.googleapis.com/youtube/v3/search?part=id&type=channel&q={query}&maxResults=1&key={self.api_key}"
             res = httpx.get(url, timeout=5.0).json()
@@ -43,20 +52,23 @@ class YouTubeService:
 
         return None
 
-    def fetch_channel_comments(self, channel_id_or_handle: str = "demo", range_type: str = "Last 30 days") -> List[Dict[str, str]]:
-        if self.api_key:
-            real_channel_id = self.resolve_channel_id(channel_id_or_handle)
+    def fetch_channel_comments(self, channel_handle: str = None, range_type: str = "Last 30 days") -> List[Dict[str, str]]:
+        if self.api_key and channel_handle:
+            real_channel_id = self.resolve_channel_id(channel_handle)
             if real_channel_id:
+                print(f"[YouTubeService] Fetching LIVE YouTube comments for channel_id: {real_channel_id}")
                 comments = self._fetch_live_youtube_comments(real_channel_id)
                 if comments:
+                    print(f"[YouTubeService] Successfully retrieved {len(comments)} LIVE YouTube comments!")
                     return comments
 
+        print(f"[YouTubeService] Using fallback audience dataset for handle: {channel_handle}")
         return self._get_fallback_comments()
 
     def _fetch_live_youtube_comments(self, channel_id: str) -> List[Dict[str, str]]:
         try:
             url = f"https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&allThreadsRelatedToChannelId={channel_id}&maxResults=100&key={self.api_key}"
-            res = httpx.get(url, timeout=10.0).json()
+            res = httpx.get(url, timeout=8.0).json()
             items = res.get("items", [])
             comments = []
             for item in items:

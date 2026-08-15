@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -96,8 +96,18 @@ def get_dashboard():
     }
 
 @app.post("/api/analyze")
-def run_full_analysis(range_type: str = Query("Last 30 days")):
-    raw_comments = youtube_service.fetch_channel_comments(range_type=range_type)
+def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: Optional[str] = Query(None)):
+    # Read connected channel from DB if not explicitly passed
+    if not channel_handle:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT channel_name FROM channels LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            channel_handle = row["channel_name"] if isinstance(row, dict) else row[0]
+        conn.close()
+
+    raw_comments = youtube_service.fetch_channel_comments(channel_handle=channel_handle, range_type=range_type)
     classified = classifier_agent.process_batch(raw_comments)
     gaps = gap_detector_agent.detect_gaps(classified)
     ranked_opps = scorer_agent.score_opportunities(gaps)

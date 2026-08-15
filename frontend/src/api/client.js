@@ -29,5 +29,6 @@ export const api = {
   getAnalytics: () => fetchApi('/analytics'),
   getSettings: () => fetchApi('/settings'),
   saveSettings: (data) => fetchApi('/settings', { method: 'POST', body: JSON.stringify(data) }),
-  runAnalysis: (rangeType) => fetchApi(`/analyze?range_type=${encodeURIComponent(rangeType)}`, { method: 'POST' }),
+  runAnalysis: (rangeType = "Last 30 days", channelHandle = "") => 
+    fetchApi(`/analyze?range_type=${encodeURIComponent(rangeType)}${channelHandle ? `&channel_handle=${encodeURIComponent(channelHandle)}` : ''}`, { method: 'POST' }),
 };

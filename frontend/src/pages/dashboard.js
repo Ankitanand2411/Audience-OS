@@ -19,13 +19,17 @@ export function renderDashboard(greeting, channel, apiData) {
   const kpis = apiData?.kpi || DEMO_KPI;
   const opps = apiData?.opportunities || DEMO_OPPS;
   const comments = apiData?.recent_comments || DEMO_COMMENTS;
+  const channelName = apiData?.channel?.channel_name || channel.channelName || '@MKBHD';
 
   return `
     <div class="page-header">
-      <h1 class="page-title">${greeting}, ${channel.name}</h1>
-      <p class="page-desc">Your audience has spoken. Here's what they want next.</p>
-      <div class="page-actions">
-        <button class="btn btn-primary" onclick="_navigate('opportunities')"><i data-lucide="sparkles"></i>View Opportunities</button>
+      <div>
+        <h1 class="page-title">${greeting}, ${apiData?.channel?.name || channel.name}</h1>
+        <p class="page-desc">Your audience has spoken. Live analysis connected to YouTube Data API & Groq LLM Agents.</p>
+      </div>
+      <div class="page-actions" style="display:flex;align-items:center;gap:var(--space-2);background:var(--surface-elevated);padding:8px 12px;border-radius:var(--radius-lg);border:1px solid var(--border-color)">
+        <input type="text" id="live-channel-input" class="input" placeholder="YouTube Handle (e.g. @MKBHD)" style="width:220px;padding:6px 12px;font-size:13px" value="${channelName}" />
+        <button class="btn btn-primary btn-sm" id="btn-run-live-analysis"><i data-lucide="sparkles"></i>Run Live Analysis</button>
       </div>
     </div>
 
@@ -48,7 +52,7 @@ export function renderDashboard(greeting, channel, apiData) {
       <div class="section-header">
         <div>
           <h2 class="section-title">Top Content Opportunities</h2>
-          <p class="section-subtitle">Ranked by audience demand and content gap analysis (Powered by FastAPI Agents)</p>
+          <p class="section-subtitle">Ranked by audience demand and content gap analysis (Powered by FastAPI + Groq LLM Agents)</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="_navigate('opportunities')">View all <i data-lucide="arrow-right"></i></button>
       </div>
@@ -100,7 +104,7 @@ export function renderDashboard(greeting, channel, apiData) {
                   <div class="comment-meta">
                     <span class="badge badge-${(c.comment_type || c.type) === 'REQUEST' ? 'accent' : (c.comment_type || c.type) === 'CONFUSION' ? 'warning' : (c.comment_type || c.type) === 'QUESTION' ? 'info' : 'default'}">${c.comment_type || c.type}</span>
                     <span>${c.topic}</span>
-                    <span>${c.time_ago || c.time}</span>
+                    <span>${c.time_ago || c.time || 'recent'}</span>
                   </div>
                 </div>
               </div>

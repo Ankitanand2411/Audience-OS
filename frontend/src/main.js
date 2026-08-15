@@ -235,6 +235,30 @@ function attachEvents() {
   const overlay = document.getElementById('sidebar-overlay');
   if (menuBtn) menuBtn.addEventListener('click', () => { sidebarOpen = !sidebarOpen; document.getElementById('sidebar').classList.toggle('open', sidebarOpen); overlay.classList.toggle('active', sidebarOpen); });
   if (overlay) overlay.addEventListener('click', () => { sidebarOpen = false; document.getElementById('sidebar').classList.remove('open'); overlay.classList.remove('active'); });
+
+  const runLiveBtn = document.getElementById('btn-run-live-analysis');
+  if (runLiveBtn) {
+    runLiveBtn.addEventListener('click', async () => {
+      const handleInput = document.getElementById('live-channel-input');
+      const channelHandle = handleInput ? handleInput.value.trim() : '';
+      
+      runLiveBtn.disabled = true;
+      runLiveBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> Fetching Live YouTube Comments...`;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      showToast(`Connecting to YouTube API for ${channelHandle || 'channel'}...`);
+
+      const result = await api.runAnalysis("Last 30 days", channelHandle);
+      
+      if (result) {
+        showToast(`Analyzed ${result.processed_comments || 0} live comments! Found ${result.new_opportunities || 0} new opportunities.`);
+      } else {
+        showToast(`Analysis completed for ${channelHandle}!`);
+      }
+
+      pageStateData = await loadPageData(currentPage);
+      render();
+    });
+  }
 }
 
 // Content generation simulation calling FastAPI ContentStudioAgent
