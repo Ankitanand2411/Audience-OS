@@ -1,4 +1,14 @@
+import { api } from '../api/client.js';
+
 export function renderSettings(channel) {
+  window._saveChannelSettings = async function() {
+    const nameVal = document.getElementById('settings-name-input').value;
+    const channelVal = document.getElementById('settings-channel-input').value;
+
+    await api.saveSettings({ name: nameVal, channel_name: channelVal });
+    _showToast('Channel settings saved to backend!');
+  };
+
   return `
     <div class="page-header">
       <h1 class="page-title">Settings</h1>
@@ -13,11 +23,26 @@ export function renderSettings(channel) {
             <i data-lucide="video" style="width:24px;height:24px;color:var(--color-error)"></i>
           </div>
           <div style="flex:1">
-            <div style="font-weight:var(--font-weight-semibold);margin-bottom:2px">${channel.channelName}</div>
-            <div style="font-size:var(--font-size-sm);color:var(--text-secondary)">Connected · Last synced 2 hours ago</div>
+            <div style="font-weight:var(--font-weight-semibold);margin-bottom:2px" id="settings-channel-display">${channel.channelName}</div>
+            <div style="font-size:var(--font-size-sm);color:var(--text-secondary)">Connected · YouTube Data API Active</div>
           </div>
           <span class="badge badge-success">Connected</span>
         </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="card">
+        <h3 class="card-title" style="margin-bottom:var(--space-5)">Channel Profile</h3>
+        <div class="input-group" style="max-width:400px;margin-bottom:var(--space-4)">
+          <label class="input-label">Creator Name</label>
+          <input class="input" id="settings-name-input" value="${channel.name}" />
+        </div>
+        <div class="input-group" style="max-width:400px;margin-bottom:var(--space-5)">
+          <label class="input-label">Channel Name or Handle</label>
+          <input class="input" id="settings-channel-input" value="${channel.channelName}" />
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="_saveChannelSettings()"><i data-lucide="save"></i>Save Changes</button>
       </div>
     </section>
 
@@ -41,21 +66,6 @@ export function renderSettings(channel) {
             <option>Spanish</option>
           </select>
         </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="card">
-        <h3 class="card-title" style="margin-bottom:var(--space-5)">Profile</h3>
-        <div class="input-group" style="max-width:400px;margin-bottom:var(--space-4)">
-          <label class="input-label">Name</label>
-          <input class="input" value="${channel.name}" />
-        </div>
-        <div class="input-group" style="max-width:400px;margin-bottom:var(--space-5)">
-          <label class="input-label">Email</label>
-          <input class="input" value="ankit@aiengineering.daily" />
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="_showToast('Settings saved')">Save Changes</button>
       </div>
     </section>
 

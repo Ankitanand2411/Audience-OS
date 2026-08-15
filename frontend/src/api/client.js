@@ -27,5 +27,7 @@ export const api = {
   saveContentStudio: (data) => fetchApi('/content-studio/save', { method: 'POST', body: JSON.stringify(data) }),
   getCalendar: () => fetchApi('/calendar'),
   getAnalytics: () => fetchApi('/analytics'),
+  getSettings: () => fetchApi('/settings'),
+  saveSettings: (data) => fetchApi('/settings', { method: 'POST', body: JSON.stringify(data) }),
   runAnalysis: (rangeType) => fetchApi(`/analyze?range_type=${encodeURIComponent(rangeType)}`, { method: 'POST' }),
 };

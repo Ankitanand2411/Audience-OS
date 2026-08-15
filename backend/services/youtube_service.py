@@ -6,16 +6,50 @@ class YouTubeService:
     """
     Service to interface with YouTube Data API v3 or simulate live audience comments.
     Reads YOUTUBE_API_KEY from environment variables.
+    Supports resolving handles (@channel), channel IDs, and video comment threads.
     """
 
     def __init__(self):
         self.api_key = os.getenv("YOUTUBE_API_KEY")
 
+    def resolve_channel_id(self, query: str) -> str:
+        if not self.api_key or query == "demo":
+            return None
+
+        # Clean query
+        query = query.strip()
+        if query.startswith("UC") and len(query) == 24:
+            return query
+
+        handle = query if query.startswith("@") else f"@{query}"
+        try:
+            url = f"https://www.googleapis.com/youtube/v3/channels?part=id&forHandle={handle}&key={self.api_key}"
+            res = httpx.get(url, timeout=5.0).json()
+            items = res.get("items", [])
+            if items:
+                return items[0]["id"]
+        except Exception as e:
+            print(f"[YouTubeService] Handle resolution failed for {handle}: {e}")
+
+        # Fallback to search query
+        try:
+            url = f"https://www.googleapis.com/youtube/v3/search?part=id&type=channel&q={query}&maxResults=1&key={self.api_key}"
+            res = httpx.get(url, timeout=5.0).json()
+            items = res.get("items", [])
+            if items:
+                return items[0]["id"]["channelId"]
+        except Exception as e:
+            print(f"[YouTubeService] Search resolution failed for {query}: {e}")
+
+        return None
+
     def fetch_channel_comments(self, channel_id_or_handle: str = "demo", range_type: str = "Last 30 days") -> List[Dict[str, str]]:
         if self.api_key:
-            comments = self._fetch_live_youtube_comments(channel_id_or_handle)
-            if comments:
-                return comments
+            real_channel_id = self.resolve_channel_id(channel_id_or_handle)
+            if real_channel_id:
+                comments = self._fetch_live_youtube_comments(real_channel_id)
+                if comments:
+                    return comments
 
         return self._get_fallback_comments()
 
@@ -33,7 +67,7 @@ class YouTubeService:
                 })
             return comments
         except Exception as e:
-            print(f"[YouTubeService] Live API call failed, using fallback comments: {e}")
+            print(f"[YouTubeService] Live API comment fetch failed: {e}")
             return []
 
     def _get_fallback_comments(self) -> List[Dict[str, str]]:

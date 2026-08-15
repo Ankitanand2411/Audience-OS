@@ -298,3 +298,20 @@ def get_settings():
     row = cursor.fetchone()
     conn.close()
     return {"channel": dict(row) if row else {}}
+
+class UpdateSettingsRequest(BaseModel):
+    name: str
+    channel_name: str
+
+@app.post("/api/settings")
+def update_settings(body: UpdateSettingsRequest):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE channels SET name = ?, channel_name = ?, last_synced = CURRENT_TIMESTAMP WHERE id = 'c1'", (body.name, body.channel_name))
+    if cursor.rowcount == 0:
+        cursor.execute("INSERT INTO channels (id, name, channel_name, avatar, connected) VALUES ('c1', ?, ?, ?, 1)", (body.name, body.channel_name, body.name[0] if body.name else 'C'))
+
+    conn.commit()
+    conn.close()
+    return {"message": "Channel settings updated successfully"}
