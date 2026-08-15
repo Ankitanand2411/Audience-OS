@@ -1,39 +1,109 @@
-# AudienceOS — Production-Ready Content Intelligence Platform
+# AudienceOS - Production Content Intelligence Engine
 
-> **Your audience already tells you what to create.**
-
-AudienceOS is an AI-powered content intelligence platform for YouTube creators. It connects to a creator's channel, analyzes audience conversations, identifies recurring questions, requests, confusion, emerging topics, and content gaps, then converts those insights into ranked content opportunities and ready-to-publish content.
+AudienceOS is an AI-powered content intelligence platform for YouTube creators. It converts audience comment streams and engagement signals into actionable, ranked content opportunities and ready-to-publish content packages.
 
 ---
 
-## 🏗️ Architecture
+## 1. System Architecture
 
-- **Frontend**: Vite, HTML5, Vanilla JS, Lucide Icons, Custom CSS Design System (`/frontend`)
-- **Backend Engine**: FastAPI, Python 3.12, Pydantic, SQLite3 (`/backend`)
-- **AI Agent Suite**:
-  - `CommentClassifierAgent`: Classifies audience comments into Question, Request, Confusion, Feedback, Idea.
-  - `ContentGapDetectorAgent`: Identifies unaddressed topics against existing channel coverage.
-  - `OpportunityScorerAgent`: Scores and ranks opportunities (0–100).
-  - `ContentStudioAgent`: Generates full content packages (Titles, Hook, Script, Description, Tags, Shorts, Social Posts).
+AudienceOS is built as a decoupled, multi-agent platform comprising a high-density frontend client and a Python FastAPI backend service.
+
+```
+[ Frontend: Vite + Vanilla JS + CSS Design System ]
+                      │
+                      │ REST API (JSON / HTTP)
+                      ▼
+[ Backend: FastAPI Engine (Python 3.12) ]
+                      │
+        ┌─────────────┼─────────────┐
+        ▼             ▼             ▼
+  [ SQLite DB ]  [ YouTube API ] [ Groq LLM API ]
+                                  (llama-3.3-70b)
+```
+
+### Component Breakdown
+
+1. **Frontend Application (`/frontend`)**
+   - Built with Vite, ES Modules, and Vanilla JavaScript.
+   - Design system styled using pure CSS tokens (dark theme, responsive grid layouts).
+   - Dynamic routing and single-page application state management.
+   - API client module (`src/api/client.js`) for RESTful interaction with the backend.
+
+2. **Backend Service Engine (`/backend`)**
+   - Built with Python 3.12 and FastAPI framework.
+   - Native CORS middleware for cross-origin request handling.
+   - Persistent SQLite database layer (`audienceos.db`) using Python `sqlite3`.
+
+3. **Groq AI Agent Engine (`/backend/agents`)**
+   - `CommentClassifierAgent`: Categorizes audience input using Groq `llama-3.1-8b-instant` or heuristic NLP rule parsing.
+   - `ContentGapDetectorAgent`: Identifies missing topics against channel content using Groq `llama-3.3-70b-versatile`.
+   - `OpportunityScorerAgent`: Formulates 0-100 priority opportunity scores using demand velocity and coverage penalties.
+   - `ContentStudioAgent`: Generates structured content packages using Groq `llama-3.3-70b-versatile`.
+
+4. **External Services (`/backend/services`)**
+   - `YouTubeService`: Integrates with YouTube Data API v3 for live video and comment thread fetching.
 
 ---
 
-## 🚀 Quick Start
+## 2. End-to-End Execution Flow
 
-### 1. Run Backend (FastAPI)
+Here is what actually happens when a user runs AudienceOS:
+
+### Phase 1: Ingestion & Comment Fetching
+- The user initiates an audience analysis from the Onboarding flow or Dashboard.
+- `YouTubeService` receives the request and fetches raw comment threads from YouTube Data API v3 or local channel streams.
+
+### Phase 2: AI Intent Classification
+- `CommentClassifierAgent` processes incoming comments.
+- Each comment is analyzed for intent bucket (`QUESTION`, `REQUEST`, `CONFUSION`, `FEEDBACK`, `IDEA`), technology topic, priority level (`High`, `Medium`, `Low`), and author avatar initials.
+
+### Phase 3: Content Gap Detection
+- `ContentGapDetectorAgent` aggregates comment topics against existing channel video titles.
+- It calculates interaction frequency, growth rate, and assigns coverage levels (`Low`, `Medium`, `High`).
+
+### Phase 4: Opportunity Ranking & Scoring
+- `OpportunityScorerAgent` evaluates the topic gaps using the formula:
+  `Opportunity Score = (Demand Score * 0.8) + (Mention Volume * 4) - Coverage Penalty`
+- Scored opportunities are saved to SQLite and populated on the Dashboard and Opportunities page.
+
+### Phase 5: AI Content Package Generation
+- Selecting "Generate Content" calls `ContentStudioAgent` via endpoint `/api/opportunities/{id}/generate`.
+- Groq LLM generates viral title variations, a 30-second video hook, a structured multi-section script, an SEO description, tags, YouTube Shorts script, a LinkedIn post, and an X thread.
+
+### Phase 6: Management & Execution
+- Generated packages can be edited and saved directly to SQLite from Content Studio.
+- Scheduled content is mapped to the monthly Calendar view.
+- Channel growth and view analytics are tracked on the Analytics page.
+
+---
+
+## 3. Environment Setup & Configuration
+
+### Prerequisites
+- Python 3.12+
+- Node.js 18+
+
+### Step 1: Configure Backend Environment
+Create a `.env` file inside the `backend/` directory:
+
+```env
+GROQ_API_KEY=your_groq_api_key_here
+YOUTUBE_API_KEY=your_youtube_data_api_key_here
+```
+
+### Step 2: Start Backend API Server
 
 ```bash
 cd backend
 python3 -m venv .venv
-source .venv/bin/activate  # Or .venv\Scripts\activate on Windows
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API server will run at `http://localhost:8000`.  
-Swagger UI Documentation: `http://localhost:8000/docs`.
+Backend API Docs will be available at: `http://localhost:8000/docs`
 
-### 2. Run Frontend (Vite)
+### Step 3: Start Frontend Client
 
 ```bash
 cd frontend
@@ -41,15 +111,23 @@ npm install
 npm run dev
 ```
 
-The web application will run at `http://localhost:5173`.
+Frontend application will be available at: `http://localhost:5173`
 
 ---
 
-## ⚡ Features
+## 4. API Specification Summary
 
-- **Dashboard**: High-level KPI metrics, top AI content opportunities, demand trends & recent audience signals.
-- **Audience Intelligence**: Dense data presentation of audience comments categorized by intent and priority.
-- **Content Opportunities**: Detailed intelligence reports with evidence grids, gap analysis, and recommended hooks.
-- **Content Studio**: Multi-section writing workspace for title options, hooks, scripts, descriptions, and tags.
-- **Calendar**: Content pipeline schedule and platform status.
-- **Analytics**: Channel performance insights with AI recommendations.
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/health` | Service health status check |
+| GET | `/api/dashboard` | Dashboard metrics, opportunities, and audience signals |
+| POST | `/api/analyze` | Triggers multi-agent audience analysis pipeline |
+| GET | `/api/audience` | Classified audience comments and intent distribution |
+| GET | `/api/opportunities` | Ranked content opportunities and topic gaps |
+| GET | `/api/opportunities/{id}` | Detailed opportunity evidence report |
+| POST | `/api/opportunities/{id}/generate` | Invokes Content Studio agent to build package |
+| GET | `/api/content-studio` | Latest generated content package |
+| POST | `/api/content-studio/save` | Saves edited title, hook, script, and description |
+| GET | `/api/calendar` | Monthly scheduled content items |
+| GET | `/api/analytics` | Channel performance metrics and AI insights |
+| GET | `/api/settings` | Channel configuration and connection status |
