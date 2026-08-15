@@ -233,3 +233,13 @@ The key insight? It's about autonomy, not capability. A chatbot responds. A tool
 
     conn.commit()
     conn.close()
+
+if __name__ == "__main__":
+    print(f"Initializing SQLite database at: {DB_PATH}")
+    init_db()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [r[0] for r in cursor.fetchall()]
+    print(f"Database setup complete! Created {len(tables)} tables: {', '.join(tables)}")
+    conn.close()
