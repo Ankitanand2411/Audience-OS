@@ -1,14 +1,8 @@
 import { api } from '../api/client.js';
 
 let visibleMonth = new Date();
-
-function pad(value) {
-  return String(value).padStart(2, '0');
-}
-
-function toDateTimeInputValue(date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+const pad = (value) => String(value).padStart(2, '0');
+const toDateTimeInputValue = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
 function nextMorning() {
   const date = new Date();
@@ -42,30 +36,22 @@ export function renderCalendar(apiData) {
   const cells = [];
 
   for (let index = 0; index < startDow; index += 1) cells.push({ day: null });
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    cells.push({ day, items: events.filter(event => eventMatchesDay(event, year, month, day)) });
-  }
+  for (let day = 1; day <= daysInMonth; day += 1) cells.push({ day, items: events.filter(event => eventMatchesDay(event, year, month, day)) });
   while (cells.length % 7 !== 0) cells.push({ day: null });
 
-  window._calendarShift = function(delta) {
+  window._calendarShift = (delta) => {
     visibleMonth = new Date(year, month + delta, 1);
     window._navigate('calendar');
   };
-
-  window._scheduleYouTubeVideo = async function(auto = false) {
+  window._openScheduleModal = () => document.getElementById('schedule-modal')?.classList.add('active');
+  window._closeScheduleModal = () => document.getElementById('schedule-modal')?.classList.remove('active');
+  window._scheduleYouTubeVideo = async (auto = false) => {
     const title = document.getElementById('calendar-video-title')?.value.trim();
     const date = document.getElementById('calendar-date-time')?.value;
-    if (!title) {
-      _showToast('Add a YouTube video title first.');
-      return;
-    }
-    const result = auto
-      ? await api.autoScheduleYouTubeVideo({ title })
-      : await api.scheduleYouTubeVideo({ title, scheduled_date: date });
-    if (!result) {
-      _showToast('Could not schedule the video. Check the backend.');
-      return;
-    }
+    if (!title) return _showToast('Add a YouTube video title first.');
+    if (!auto && !date) return _showToast('Choose a publish date and time.');
+    const result = auto ? await api.autoScheduleYouTubeVideo({ title }) : await api.scheduleYouTubeVideo({ title, scheduled_date: date });
+    if (!result) return _showToast('Could not schedule the video. Check the backend.');
     visibleMonth = new Date(result.scheduled_date);
     _showToast(auto ? 'Scheduled into the next free weekday at 10:00 AM.' : 'YouTube video scheduled.');
     await window._navigate('calendar');
@@ -73,32 +59,32 @@ export function renderCalendar(apiData) {
 
   return `
     <div class="page-header">
-      <h1 class="page-title">Content Calendar</h1>
-      <p class="page-desc">Schedule your YouTube video plan. Auto-scheduling chooses the next free weekday at 10:00 AM.</p>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+        <div><h1 class="page-title">Content Calendar</h1><p class="page-desc">Plan your publishing schedule. Auto-scheduling chooses the next free weekday at 10:00 AM.</p></div>
+        <button class="btn btn-primary" onclick="_openScheduleModal()"><i data-lucide="calendar-plus"></i>Schedule YouTube Video</button>
+      </div>
     </div>
 
-    <section class="card section" style="max-width:900px">
-      <div class="card-header"><div><h2 class="card-title">Schedule a YouTube Video</h2><p class="card-subtitle">This saves a publishing plan in AudienceOS; it does not upload the video to YouTube.</p></div><i data-lucide="calendar-plus" style="color:var(--accent-secondary)"></i></div>
-      <div class="calendar-scheduler">
-        <div class="input-group"><label class="input-label" for="calendar-video-title">Video title</label><input class="input" id="calendar-video-title" value="${suggestedTitle}" placeholder="Generate content first, or enter a title" /></div>
-        <div class="input-group"><label class="input-label" for="calendar-date-time">Publish date and time</label><input class="input" id="calendar-date-time" type="datetime-local" value="${nextMorning()}" /></div>
-        <div class="calendar-scheduler-actions"><button class="btn btn-primary" onclick="_scheduleYouTubeVideo(false)"><i data-lucide="calendar-check"></i>Schedule video</button><button class="btn btn-secondary" onclick="_scheduleYouTubeVideo(true)"><i data-lucide="sparkles"></i>Auto-schedule next slot</button></div>
+    <div class="modal-overlay" id="schedule-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title" onclick="if(event.target===this)_closeScheduleModal()">
+      <div class="modal schedule-modal">
+        <div class="modal-header"><div><h2 class="modal-title" id="schedule-modal-title">Schedule YouTube Video</h2><p class="card-subtitle">This creates a publishing plan in AudienceOS. It does not upload the video to YouTube.</p></div><button class="btn btn-ghost btn-sm" onclick="_closeScheduleModal()" aria-label="Close scheduler"><i data-lucide="x"></i></button></div>
+        <div class="calendar-scheduler">
+          <div class="input-group"><label class="input-label" for="calendar-video-title">Video title</label><input class="input" id="calendar-video-title" value="${suggestedTitle}" placeholder="Generate content first, or enter a title" /></div>
+          <div class="input-group"><label class="input-label" for="calendar-date-time">Publish date and time</label><input class="input" id="calendar-date-time" type="datetime-local" value="${nextMorning()}" /></div>
+          <div class="calendar-scheduler-actions"><button class="btn btn-primary" onclick="_scheduleYouTubeVideo(false)"><i data-lucide="calendar-check"></i>Schedule video</button><button class="btn btn-secondary" onclick="_scheduleYouTubeVideo(true)"><i data-lucide="sparkles"></i>Auto-schedule next slot</button></div>
+        </div>
       </div>
-    </section>
+    </div>
 
     <section class="section">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)">
-        <h2 style="font-size:var(--font-size-xl);font-weight:var(--font-weight-semibold)">${monthName}</h2>
-        <div style="display:flex;gap:var(--space-2)"><button class="btn btn-ghost btn-sm" onclick="_calendarShift(-1)" aria-label="Previous month"><i data-lucide="chevron-left"></i></button><button class="btn btn-ghost btn-sm" onclick="_calendarShift(1)" aria-label="Next month"><i data-lucide="chevron-right"></i></button></div>
-      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)"><h2 style="font-size:var(--font-size-xl);font-weight:var(--font-weight-semibold)">${monthName}</h2><div style="display:flex;gap:var(--space-2)"><button class="btn btn-ghost btn-sm" onclick="_calendarShift(-1)" aria-label="Previous month"><i data-lucide="chevron-left"></i></button><button class="btn btn-ghost btn-sm" onclick="_calendarShift(1)" aria-label="Next month"><i data-lucide="chevron-right"></i></button></div></div>
       <div class="cal-grid">
         ${days.map(day => `<div class="cal-header">${day}</div>`).join('')}
         ${cells.map(cell => {
           if (!cell.day) return '<div class="cal-cell" style="background:var(--bg-primary)"></div>';
           const isToday = cell.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-          return `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="cal-cell-date">${cell.day}</div>${cell.items.map(event => `<div class="cal-item yt"><span class="cal-item-platform">${event.platform || 'YouTube'}${formatEventTime(event) ? ` · ${formatEventTime(event)}` : ''}</span><span>${event.title}</span></div>`).join('')}</div>`;
+          return `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="cal-cell-date">${cell.day}</div>${cell.items.map(event => `<div class="cal-item ${event.event_type || event.type || 'yt'}"><span class="cal-item-platform">${event.platform || 'YouTube'}${formatEventTime(event) ? ` · ${formatEventTime(event)}` : ''}</span><span>${event.title}</span></div>`).join('')}</div>`;
         }).join('')}
       </div>
-    </section>
-  `;
+    </section>`;
 }

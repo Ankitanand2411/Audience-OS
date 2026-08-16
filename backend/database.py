@@ -8,17 +8,60 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 DB_PATH = os.path.join(os.path.dirname(__file__), "audienceos.db")
 
+
+class PostgresCursor:
+    """Keep the route SQL portable while psycopg2 uses %s placeholders."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=None):
+        query = query.replace("?", "%s")
+        return self._cursor.execute(query, params) if params is not None else self._cursor.execute(query)
+
+    def executemany(self, query, params):
+        return self._cursor.executemany(query.replace("?", "%s"), params)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class PostgresConnection:
+    """Expose a sqlite-like cursor interface to the rest of the application."""
+
+    is_postgres = True
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self, *args, **kwargs):
+        return PostgresCursor(self._connection.cursor(*args, **kwargs))
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def is_postgres(conn) -> bool:
+    return bool(getattr(conn, "is_postgres", False))
+
+
+def last_insert_id(cursor, conn) -> int:
+    """Return the generated primary key for SQLite or PostgreSQL."""
+    if is_postgres(conn):
+        cursor.execute("SELECT LASTVAL() AS id")
+        return cursor.fetchone()["id"]
+    return cursor.lastrowid
+
 def get_db():
     if DATABASE_URL and DATABASE_URL.startswith("postgres"):
         try:
             import psycopg2
             from psycopg2.extras import RealDictCursor
             url = DATABASE_URL.replace("postgres://", "postgresql://")
-            # Connect with 1-second timeout for instant local fallback
-            conn = psycopg2.connect(url, cursor_factory=RealDictCursor, connect_timeout=1)
-            return conn
+            conn = psycopg2.connect(url, cursor_factory=RealDictCursor, connect_timeout=10)
+            return PostgresConnection(conn)
         except Exception as e:
-            print(f"[Database Note] Cloud PostgreSQL connection timed out/failed ({e}). Using local SQLite database.")
+            raise RuntimeError(f"Could not connect to DATABASE_URL: {e}") from e
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -29,8 +72,8 @@ def init_db():
         conn = get_db()
         cursor = conn.cursor()
 
-        is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
-        pk_auto = "SERIAL PRIMARY KEY" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        postgres = is_postgres(conn)
+        pk_auto = "SERIAL PRIMARY KEY" if postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS channels (
@@ -104,6 +147,7 @@ def init_db():
         cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS calendar_events (
             id {pk_auto},
+            channel_handle TEXT,
             day INTEGER NOT NULL,
             platform TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -112,6 +156,16 @@ def init_db():
             scheduled_date TEXT
         )
         """)
+
+        # Existing local databases predate channel-scoped calendar events.
+        # Older events intentionally remain unassigned and are never shown for a channel.
+        if postgres:
+            cursor.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS channel_handle TEXT")
+        else:
+            try:
+                cursor.execute("ALTER TABLE calendar_events ADD COLUMN channel_handle TEXT")
+            except sqlite3.OperationalError:
+                pass
 
         cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS analytics (
@@ -129,6 +183,8 @@ def init_db():
         conn.close()
         seed_if_empty()
     except Exception as e:
+        if DATABASE_URL:
+            raise
         print(f"[Database Initialization Warning] {e}")
 
 def seed_if_empty():
@@ -158,11 +214,11 @@ def seed_if_empty():
                 ("Building with FastAPI + LangChain", "Growing demand for a practical guide on integrating LangChain agents with FastAPI for production deployments.", 78, 62, "+14%", "Medium", "Tutorial Series", 0),
                 ("Local LLM Setup Guide", "Viewers want to know how to run LLMs locally with Ollama, vLLM, and llama.cpp for development and privacy.", 72, 54, "+11%", "Medium", "How-to Video", 0)
             ]
-            is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
+            postgres = is_postgres(conn)
             cursor.executemany("""
             INSERT INTO opportunities (title, description, score, questions, growth, coverage, format, trending)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """ if is_postgres else """
+            """ if postgres else """
             INSERT INTO opportunities (title, description, score, questions, growth, coverage, format, trending)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, opps)
@@ -182,11 +238,11 @@ def seed_if_empty():
                 ('NR', 'I keep getting bad results with my RAG pipeline. Chunking seems wrong but I don\'t know how to fix it.', 'CONFUSION', 'RAG', 'High', '1 day ago'),
                 ('VT', 'Great content on LangChain! Can you cover LangGraph next? The documentation is really confusing.', 'FEEDBACK', 'LangChain', 'Low', '2 days ago')
             ]
-            is_postgres = hasattr(conn, "pgconn") or type(conn).__module__.startswith("psycopg2")
+            postgres = is_postgres(conn)
             cursor.executemany("""
             INSERT INTO comments (author_avatar, text, comment_type, topic, priority, time_ago)
             VALUES (%s, %s, %s, %s, %s, %s)
-            """ if is_postgres else """
+            """ if postgres else """
             INSERT INTO comments (author_avatar, text, comment_type, topic, priority, time_ago)
             VALUES (?, ?, ?, ?, ?, ?)
             """, cmts)

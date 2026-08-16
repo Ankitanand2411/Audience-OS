@@ -164,7 +164,7 @@ Classifier fallback topic matching recognizes AI Agents, MCP, RAG, FastAPI, Olla
 
 ### Persistence model
 
-`backend/database.py` initializes SQLite at `backend/audienceos.db`. On first run it seeds a channel, five opportunities, eight comments, and no calendar events. `DATABASE_URL` beginning with `postgres` attempts a one-second psycopg2 connection before falling back to SQLite.
+`backend/database.py` initializes SQLite at `backend/audienceos.db` by default. Set `DATABASE_URL` to use PostgreSQL, including Supabase. Once `DATABASE_URL` is set, the backend fails clearly if it cannot connect rather than quietly writing data to a local SQLite file. Calendar events are stored with the active YouTube channel handle, so schedules from one channel are not shown when another channel is analyzed.
 
 ```mermaid
 erDiagram
@@ -225,6 +225,19 @@ GROQ_API_KEY_GENERATOR=
 DATABASE_URL=
 ```
 
+### Use Supabase as the online database
+
+1. Create a Supabase project, then open **Connect** → **Direct connection** and copy its PostgreSQL URI.
+2. Add it to `backend/.env` (keep this file private):
+
+```env
+DATABASE_URL=postgresql://postgres.<project-ref>:YOUR_PASSWORD@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+```
+
+3. Restart the backend. It creates the required tables automatically. Do not use the Supabase anon key in this backend; the backend connects with the database URI.
+
+For a serverless host that cannot maintain direct PostgreSQL connections, use Supabase’s pooler URI instead. Keep the connection string only in the host’s secret/environment-variable settings.
+
 The content generator also recognizes `GROQ_API_KEY_2`; the classifier also recognizes `GROQ_API_KEY_1`.
 
 ### Start the backend
@@ -276,7 +289,7 @@ At repository root, `start.sh` activates a root-level `.venv`, kills processes o
 - Analysis is synchronous and overwrites the prior analysis dataset and all content packages. There is no job queue or analysis history.
 - YouTube retrieval does not paginate, does not use `range_type` to filter, and imports only top-level comment threads. Empty/error responses select the fallback dataset.
 - Channel coverage is compared against four static titles, not the selected channel’s actual video catalog.
-- PostgreSQL support is incomplete: route SQL uses SQLite-style `?` parameters and `cursor.lastrowid`, so SQLite is the supported path today.
+- PostgreSQL/Supabase is supported through `DATABASE_URL`. This app is still single-user: add authentication and Row Level Security before exposing it publicly to multiple creators.
 - Calendar schedules internal planning events only; it does not upload or publish to YouTube. Analytics is static. Some settings preferences are visual-only.
 - Content package title/tag fields are JSON strings at the database boundary and decoded by `GET /api/content-studio`.
 - UI rendering interpolates API data directly into HTML; treat external comment content as untrusted until output escaping is added.

@@ -13,14 +13,14 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(__file__))
 
 try:
-    from database import init_db, get_db
+    from database import init_db, get_db, last_insert_id
     from agents.comment_classifier import CommentClassifierAgent
     from agents.gap_detector import ContentGapDetectorAgent
     from agents.opportunity_scorer import OpportunityScorerAgent
     from agents.content_generator import ContentStudioAgent
     from services.youtube_service import YouTubeService
 except ImportError:
-    from .database import init_db, get_db
+    from .database import init_db, get_db, last_insert_id
     from .agents.comment_classifier import CommentClassifierAgent
     from .agents.gap_detector import ContentGapDetectorAgent
     from .agents.opportunity_scorer import OpportunityScorerAgent
@@ -126,8 +126,8 @@ def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: O
     # Update or insert channel in DB
     cursor.execute("DELETE FROM channels")
     cursor.execute("""
-    INSERT INTO channels (name, channel_name, avatar)
-    VALUES (?, ?, ?)
+    INSERT INTO channels (id, name, channel_name, avatar)
+    VALUES ('c1', ?, ?, ?)
     """, (channel_title, clean_handle, clean_handle[0:2].upper()))
 
     # Fetch live comments from YouTube Data API
@@ -245,7 +245,7 @@ def generate_content_for_opportunity(opp_id: int):
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (opp_id, titles_str, pkg.get("selected_title_index", 0), pkg.get("hook", ""), pkg.get("script", ""), pkg.get("description", ""), tags_str, pkg.get("short_script", ""), pkg.get("linkedin_post", ""), pkg.get("x_thread", ""), pkg.get("status", "draft")))
     
-    pkg_id = cursor.lastrowid
+    pkg_id = last_insert_id(cursor, conn)
     conn.commit()
     conn.close()
 
@@ -315,11 +315,21 @@ def _latest_content_title(cursor):
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
 
+
+def _active_channel_handle(cursor) -> str:
+    cursor.execute("SELECT channel_name FROM channels LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        return ""
+    return (row["channel_name"] if isinstance(row, dict) else row[0]).strip()
+
+
 @app.get("/api/calendar")
 def get_calendar():
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM calendar_events ORDER BY scheduled_date, id")
+    channel_handle = _active_channel_handle(cursor)
+    cursor.execute("SELECT * FROM calendar_events WHERE channel_handle = ? ORDER BY scheduled_date, id", (channel_handle,))
     events = [dict(r) for r in cursor.fetchall()]
     latest_title = _latest_content_title(cursor)
     conn.close()
@@ -329,12 +339,12 @@ class ScheduleCalendarRequest(BaseModel):
     title: str
     scheduled_date: str
 
-def _save_calendar_event(cursor, title: str, scheduled_at: datetime):
+def _save_calendar_event(cursor, conn, channel_handle: str, title: str, scheduled_at: datetime):
     cursor.execute("""
-    INSERT INTO calendar_events (day, platform, title, status, event_type, scheduled_date)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (scheduled_at.day, "YouTube", title.strip(), "Scheduled", "yt", scheduled_at.isoformat(timespec="minutes")))
-    return cursor.lastrowid
+    INSERT INTO calendar_events (channel_handle, day, platform, title, status, event_type, scheduled_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (channel_handle, scheduled_at.day, "YouTube", title.strip(), "Scheduled", "yt", scheduled_at.isoformat(timespec="minutes")))
+    return last_insert_id(cursor, conn)
 
 @app.post("/api/calendar")
 def schedule_calendar_event(body: ScheduleCalendarRequest):
@@ -346,7 +356,11 @@ def schedule_calendar_event(body: ScheduleCalendarRequest):
         raise HTTPException(status_code=422, detail="Use a valid date and time")
     conn = get_db()
     cursor = conn.cursor()
-    event_id = _save_calendar_event(cursor, body.title, scheduled_at)
+    channel_handle = _active_channel_handle(cursor)
+    if not channel_handle:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Connect a YouTube channel before scheduling")
+    event_id = _save_calendar_event(cursor, conn, channel_handle, body.title, scheduled_at)
     conn.commit()
     conn.close()
     return {"message": "YouTube video scheduled", "event_id": event_id, "scheduled_date": scheduled_at.isoformat(timespec="minutes")}
@@ -358,6 +372,10 @@ class AutoScheduleRequest(BaseModel):
 def auto_schedule_content(body: AutoScheduleRequest):
     conn = get_db()
     cursor = conn.cursor()
+    channel_handle = _active_channel_handle(cursor)
+    if not channel_handle:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Connect a YouTube channel before scheduling")
     title = (body.title or "").strip() or _latest_content_title(cursor)
     if not title:
         conn.close()
@@ -365,9 +383,9 @@ def auto_schedule_content(body: AutoScheduleRequest):
     candidate = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
     for _ in range(60):
         if candidate.weekday() < 5:
-            cursor.execute("SELECT COUNT(*) FROM calendar_events WHERE scheduled_date LIKE ?", (f"{candidate.date().isoformat()}%",))
+            cursor.execute("SELECT COUNT(*) FROM calendar_events WHERE channel_handle = ? AND scheduled_date LIKE ?", (channel_handle, f"{candidate.date().isoformat()}%"))
             if cursor.fetchone()[0] == 0:
-                event_id = _save_calendar_event(cursor, title, candidate)
+                event_id = _save_calendar_event(cursor, conn, channel_handle, title, candidate)
                 conn.commit()
                 conn.close()
                 return {"message": "Scheduled in the next available weekday slot", "event_id": event_id, "scheduled_date": candidate.isoformat(timespec="minutes")}
