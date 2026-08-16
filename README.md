@@ -1,97 +1,233 @@
-# AudienceOS - Production Content Intelligence Engine
+# AudienceOS
 
-AudienceOS is an AI-powered content intelligence platform for YouTube creators. It converts audience comment streams and engagement signals into actionable, ranked content opportunities and ready-to-publish content packages.
+AudienceOS is a local full-stack content-intelligence workspace for YouTube creators. It imports a channel's top-level comments (or a built-in fallback set), classifies audience intent, groups demand into content gaps, ranks opportunities, and generates a multi-platform content package.
 
----
+The project is a Vite single-page application backed by FastAPI. It runs without API keys using deterministic fallback data; YouTube and Groq keys enable live comment retrieval and LLM-generated analysis/content respectively.
 
-## 1. System Architecture
+## What it does
 
-AudienceOS is built as a decoupled, multi-agent platform comprising a high-density frontend client and a Python FastAPI backend service.
+1. Connect a channel handle or URL from onboarding, dashboard, or settings.
+2. Fetch up to 100 top-level channel comments with YouTube Data API v3 when a valid key and resolvable channel are available; otherwise use eight bundled sample comments.
+3. Classify each comment as `QUESTION`, `REQUEST`, `CONFUSION`, `FEEDBACK`, or `IDEA`.
+4. Aggregate non-general topics, compare them with a fixed channel-coverage list, and calculate demand/coverage gaps.
+5. Rank gaps into content opportunities.
+6. Generate and save a content package: titles, hook, script, description, tags, Short, LinkedIn post, and X thread.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  U[Creator in browser] --> F[Frontend\nVite + vanilla JavaScript]
+  F -->|JSON over HTTP\nlocalhost:8000/api| B[FastAPI\nbackend/main.py]
+  F --> LS[Browser localStorage\nonboarding + channel display state]
+  B --> Y[YouTubeService]
+  Y -->|when YOUTUBE_API_KEY works| YT[YouTube Data API v3]
+  Y -->|otherwise| FD[Bundled fallback comments]
+  B --> C[CommentClassifierAgent]
+  C -->|when GROQ key works| G1[Groq\nllama-3.1-8b-instant]
+  C -->|otherwise| RC[Keyword rules]
+  C --> D[ContentGapDetectorAgent]
+  D -->|optional| G2[Groq\nllama-3.3-70b-versatile]
+  D --> S[OpportunityScorerAgent]
+  S -->|optional| G3[Groq\nllama-3.3-70b-versatile]
+  S --> DB[(SQLite audienceos.db\ndefault persistence)]
+  B --> P[ContentStudioAgent]
+  P -->|optional| G4[Groq\nllama-3.3-70b-versatile]
+  P --> DB
 ```
-[ Frontend: Vite + Vanilla JS + CSS Design System ]
-                      │
-                      │ REST API (JSON / HTTP)
-                      ▼
-[ Backend: FastAPI Engine (Python 3.12) ]
-                      │
-        ┌─────────────┼─────────────┐
-        ▼             ▼             ▼
-  [ SQLite DB ]  [ YouTube API ] [ Groq LLM API ]
-                                  (llama-3.3-70b)
+
+### Analysis sequence
+
+```mermaid
+sequenceDiagram
+  participant UI as Browser UI
+  participant API as FastAPI
+  participant YT as YouTube / fallback
+  participant A as Agents
+  participant DB as Database
+  UI->>API: POST /api/analyze?channel_handle=...
+  API->>DB: replace current channel
+  API->>YT: resolve handle and fetch comments
+  YT-->>API: live comments or fallback comments
+  API->>A: classify, detect gaps, score opportunities
+  A-->>API: classified comments, gaps, opportunities
+  API->>DB: clear prior analysis and persist new result set
+  API-->>UI: analysis counts
+  UI->>API: GET dashboard/audience/opportunities
+  API->>DB: read current result set
+  API-->>UI: render data
 ```
 
-### Component Breakdown
+### Content-generation sequence
 
-1. **Frontend Application (`/frontend`)**
-   - Built with Vite, ES Modules, and Vanilla JavaScript.
-   - Design system styled using pure CSS tokens (dark theme, responsive grid layouts).
-   - Dynamic routing and single-page application state management.
-   - API client module (`src/api/client.js`) for RESTful interaction with the backend.
+```mermaid
+sequenceDiagram
+  participant UI as Opportunity UI
+  participant API as FastAPI
+  participant G as ContentStudioAgent
+  participant DB as Database
+  UI->>API: POST /api/opportunities/{id}/generate
+  API->>DB: read selected opportunity
+  API->>G: generate package
+  G-->>API: Groq result or template fallback
+  API->>DB: insert content_packages row
+  API-->>UI: package and package_id
+  UI->>API: GET /api/content-studio
+  API-->>UI: newest saved package
+  UI->>API: POST /api/content-studio/save
+  API->>DB: update newest package
+```
 
-2. **Backend Service Engine (`/backend`)**
-   - Built with Python 3.12 and FastAPI framework.
-   - Native CORS middleware for cross-origin request handling.
-   - Persistent SQLite database layer (`audienceos.db`) using Python `sqlite3`.
+## Repository map
 
-3. **Groq AI Agent Engine (`/backend/agents`)**
-   - `CommentClassifierAgent`: Categorizes audience input using Groq `llama-3.1-8b-instant` or heuristic NLP rule parsing.
-   - `ContentGapDetectorAgent`: Identifies missing topics against channel content using Groq `llama-3.3-70b-versatile`.
-   - `OpportunityScorerAgent`: Formulates 0-100 priority opportunity scores using demand velocity and coverage penalties.
-   - `ContentStudioAgent`: Generates structured content packages using Groq `llama-3.3-70b-versatile`.
+```text
+.
+├── README.md                         This project reference
+├── start.sh                          Convenience launcher for both servers
+├── backend/
+│   ├── __init__.py                   Python package marker
+│   ├── main.py                       FastAPI app, routes, orchestration
+│   ├── database.py                   SQLite/PostgreSQL connection and schema/seeding
+│   ├── requirements.txt              Python dependencies
+│   ├── agents/
+│   │   ├── __init__.py               Package marker
+│   │   ├── comment_classifier.py     Comment intent/topic classifier
+│   │   ├── gap_detector.py           Topic aggregation and coverage-gap detector
+│   │   ├── opportunity_scorer.py     Opportunity ranking/scoring agent
+│   │   └── content_generator.py      Content package generator
+│   └── services/
+│       ├── __init__.py               Package marker
+│       └── youtube_service.py        YouTube handle resolution/comment retrieval
+└── frontend/
+    ├── index.html                    Vite HTML entry; CDN Lucide icons
+    ├── package.json                  Node scripts and dependencies
+    ├── package-lock.json             Locked npm dependency tree
+    ├── public/
+    │   ├── favicon.svg               Vite favicon
+    │   └── icons.svg                 Reusable social/documentation SVG symbols
+    └── src/
+        ├── main.js                   SPA state, render shell, navigation, event wiring
+        ├── api/client.js             Hard-coded REST client (localhost:8000/api)
+        ├── data/demo.js              UI fallback data and chart series
+        ├── assets/
+        │   ├── hero.png              Unreferenced image asset
+        │   ├── javascript.svg        Unreferenced Vite starter asset
+        │   └── vite.svg              Unreferenced Vite starter asset
+        ├── pages/
+        │   ├── onboarding.js         First-run/connect flow markup
+        │   ├── dashboard.js          KPIs, re-analysis, opportunities, signals
+        │   ├── audience.js           Classified comment list and filter UI
+        │   ├── opportunities.js      Opportunities and topic table
+        │   ├── opportunity-detail.js Opportunity evidence/detail view
+        │   ├── content-studio.js     Generated-package editor/save interaction
+        │   ├── calendar.js           Dynamic month view and YouTube scheduling controls
+        │   ├── analytics.js          Metrics and SVG chart views
+        │   └── settings.js           Channel/profile preferences view
+        └── styles/
+            ├── design-system.css     Theme tokens: color, type, spacing, layout
+            ├── reset.css             Reset, base elements, focus/scrollbar styles
+            ├── layout.css            App shell, sidebar/topbar, responsive layout
+            └── components.css        Controls, cards, pages, charts, overlays
+```
 
-4. **External Services (`/backend/services`)**
-   - `YouTubeService`: Integrates with YouTube Data API v3 for live video and comment thread fetching.
+## Frontend
 
----
+The frontend uses no framework/router library. `main.js` holds the current page, rerenders the entire `#app` region, and exposes navigation helpers on `window`. Navigation is in-memory; refreshing returns to the dashboard. The first-run state and display channel state are stored in browser `localStorage` under `aos_onboarded`, `aos_channel_name`, `aos_channel_handle`, and `aos_channel_avatar`.
 
-## 2. End-to-End Execution Flow
+| View | Primary data source | Current behavior |
+|---|---|---|
+| Onboarding | `POST /api/analyze` | Connects a handle or opens demo mode. The selected analysis-range card is visual only; requests always use `Last 30 days`. |
+| Dashboard | `GET /api/dashboard` | Renders current persisted KPIs, top opportunities, comments, and a data-driven topic-demand chart. |
+| Audience | `GET /api/audience` | Renders classified comments and counts; category tabs and text search filter the comment list in the browser. |
+| Opportunities | `GET /api/opportunities` | Lists ranked opportunities and topic metrics; filter tabs are presentational. |
+| Opportunity detail | `GET /api/opportunities/{id}` | Shows one opportunity and the five newest comments (not topic-scoped evidence). |
+| Content Studio | `GET/POST /api/content-studio` | Edits and saves the YouTube title, hook, script, description, and tags for the newest package. |
+| Calendar | `GET/POST /api/calendar`, `POST /api/calendar/auto-schedule` | Schedules YouTube planning events, displays them on a dynamic month view, and can choose the next free weekday at 10:00 AM. |
+| Analytics | `GET /api/analytics` | Displays backend metrics/insight with static demo chart series and topic/format bars. |
+| Settings | `POST /api/settings`, `POST /api/analyze` | Saves display name/handle or starts a new analysis. Preference selects are not persisted. |
 
-Here is what actually happens when a user runs AudienceOS:
+If a frontend API call fails, `api/client.js` returns `null` and pages use `demo.js` where that page provides a fallback. The backend base URL is currently fixed at `http://localhost:8000/api`.
 
-### Phase 1: Ingestion & Comment Fetching
-- The user initiates an audience analysis from the Onboarding flow or Dashboard.
-- `YouTubeService` receives the request and fetches raw comment threads from YouTube Data API v3 or local channel streams.
+## Backend and agents
 
-### Phase 2: AI Intent Classification
-- `CommentClassifierAgent` processes incoming comments.
-- Each comment is analyzed for intent bucket (`QUESTION`, `REQUEST`, `CONFUSION`, `FEEDBACK`, `IDEA`), technology topic, priority level (`High`, `Medium`, `Low`), and author avatar initials.
+### Analysis pipeline
 
-### Phase 3: Content Gap Detection
-- `ContentGapDetectorAgent` aggregates comment topics against existing channel video titles.
-- It calculates interaction frequency, growth rate, and assigns coverage levels (`Low`, `Medium`, `High`).
+| Stage | Module | Live behavior | Fallback behavior |
+|---|---|---|---|
+| Comment source | `services/youtube_service.py` | Resolves `@handle`, URL, or 24-character `UC...` id then requests YouTube `commentThreads` (max 100 top-level comments). | Eight bundled technology comments. |
+| Classification | `agents/comment_classifier.py` | Groq `llama-3.1-8b-instant` returns structured comment records. | Keyword intent rules and topic matching. |
+| Gap detection | `agents/gap_detector.py` | Groq `llama-3.3-70b-versatile` receives comments plus four fixed existing-video titles. | Counts non-`General` topics; coverage is based on those same fixed titles. |
+| Scoring | `agents/opportunity_scorer.py` | Groq `llama-3.3-70b-versatile` returns ranked opportunity JSON. | `demand × 0.8 + topic count × 4 − coverage penalty`, clamped to 50–99. Coverage penalty: High=30, Medium=15, Low=0. |
+| Content package | `agents/content_generator.py` | Groq `llama-3.3-70b-versatile` returns package JSON. | Template titles, hook, script, description, tags, Short, LinkedIn, and X copy. |
 
-### Phase 4: Opportunity Ranking & Scoring
-- `OpportunityScorerAgent` evaluates the topic gaps using the formula:
-  `Opportunity Score = (Demand Score * 0.8) + (Mention Volume * 4) - Coverage Penalty`
-- Scored opportunities are saved to SQLite and populated on the Dashboard and Opportunities page.
+Classifier fallback topic matching recognizes AI Agents, MCP, RAG, FastAPI, Ollama, and LangChain; anything else is `General`. Groq failures are caught per agent and fall back to deterministic behavior where implemented.
 
-### Phase 5: AI Content Package Generation
-- Selecting "Generate Content" calls `ContentStudioAgent` via endpoint `/api/opportunities/{id}/generate`.
-- Groq LLM generates viral title variations, a 30-second video hook, a structured multi-section script, an SEO description, tags, YouTube Shorts script, a LinkedIn post, and an X thread.
+### Persistence model
 
-### Phase 6: Management & Execution
-- Generated packages can be edited and saved directly to SQLite from Content Studio.
-- Scheduled content is mapped to the monthly Calendar view.
-- Channel growth and view analytics are tracked on the Analytics page.
+`backend/database.py` initializes SQLite at `backend/audienceos.db`. On first run it seeds a channel, five opportunities, eight comments, and no calendar events. `DATABASE_URL` beginning with `postgres` attempts a one-second psycopg2 connection before falling back to SQLite.
 
----
+```mermaid
+erDiagram
+  CHANNELS { text id PK text name text channel_name }
+  COMMENTS { integer id PK text text text comment_type text topic text priority }
+  TOPICS { integer id PK text name UK integer interactions integer demand text coverage }
+  OPPORTUNITIES { integer id PK text title integer score text format }
+  CONTENT_PACKAGES { integer id PK integer opportunity_id text titles_json text script text tags_json }
+  CALENDAR_EVENTS { integer id PK integer day text platform text title }
+  ANALYTICS { integer id PK text total_views text engagement_rate text ai_insight }
+  OPPORTUNITIES ||--o{ CONTENT_PACKAGES : source_opportunity
+```
 
-## 3. Environment Setup & Configuration
+The `opportunity_id` column is logical rather than an enforced foreign key. `analytics` is defined but not read by the current analytics endpoint.
 
-### Prerequisites
-- Python 3.12+
-- Node.js 18+
+## API reference
 
-### Step 1: Configure Backend Environment
-Create a `.env` file inside the `backend/` directory:
+All routes are served by `backend/main.py`. Interactive FastAPI/OpenAPI docs are available at `/docs` while the backend is running.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/health` | Backend status response. |
+| GET | `/api/dashboard` | Channel, dynamic KPI array, five highest-scoring opportunities, five newest comments, and five top topics. |
+| POST | `/api/analyze?range_type=Last%2030%20days&channel_handle=@name` | Runs the full analysis pipeline. It deletes all comments, topics, opportunities, and packages before saving the result. |
+| GET | `/api/audience` | All comments plus intent counts. The counts include hard-coded baseline values in addition to stored comments. |
+| GET | `/api/opportunities` | All opportunities ordered by score and all topics ordered by opportunity. |
+| GET | `/api/opportunities/{opp_id}` | One opportunity or `404`, plus the five newest comments. |
+| POST | `/api/opportunities/{opp_id}/generate` | Generates and persists a content package for one opportunity or returns `404`. |
+| GET | `/api/content-studio` | The most recently saved content package, or `{ "package": null }`. |
+| POST | `/api/content-studio/save` | Updates the newest package, or creates a package if none exists. Required JSON: `titles`, `selected_title_index`, `hook`, `script`, `description`, `tags`. |
+| GET | `/api/calendar` | Calendar events plus the latest generated content title. |
+| POST | `/api/calendar` | Saves an internal YouTube scheduling event from `title` and ISO `scheduled_date`. |
+| POST | `/api/calendar/auto-schedule` | Saves the title in the next free weekday at 10:00 AM, searching 60 days ahead. |
+| GET | `/api/analytics` | Currently returns hard-coded metrics and AI insight. |
+| GET | `/api/settings` | First channel record. |
+| POST | `/api/settings` | Upserts the `c1` channel with `{ "name", "channel_name" }`. |
+
+## Run locally
+
+### Requirements
+
+- Python 3.12+ recommended
+- Node.js 18+ recommended
+- Optional: YouTube Data API v3 key
+- Optional: Groq API key
+
+### Configure environment
+
+Create `backend/.env` (do not commit secrets):
 
 ```env
-GROQ_API_KEY=your_groq_api_key_here
-YOUTUBE_API_KEY=your_youtube_data_api_key_here
+YOUTUBE_API_KEY=your_youtube_data_api_key
+GROQ_API_KEY=your_groq_api_key
+GROQ_API_KEY_CLASSIFIER=
+GROQ_API_KEY_GAP_DETECTOR=
+GROQ_API_KEY_SCORER=
+GROQ_API_KEY_GENERATOR=
+DATABASE_URL=
 ```
 
-### Step 2: Start Backend API Server
+The content generator also recognizes `GROQ_API_KEY_2`; the classifier also recognizes `GROQ_API_KEY_1`.
+
+### Start the backend
 
 ```bash
 cd backend
@@ -101,9 +237,12 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Backend API Docs will be available at: `http://localhost:8000/docs`
+Backend: `http://localhost:8000`
+OpenAPI docs: `http://localhost:8000/docs`
 
-### Step 3: Start Frontend Client
+### Start the frontend
+
+In another terminal:
 
 ```bash
 cd frontend
@@ -111,23 +250,44 @@ npm install
 npm run dev
 ```
 
-Frontend application will be available at: `http://localhost:5173`
+Frontend: `http://localhost:5173`
 
----
+### Convenience launcher
 
-## 4. API Specification Summary
+At repository root, `start.sh` activates a root-level `.venv`, kills processes on ports 8000/5173 and matching `uvicorn`/`vite` processes, starts `uvicorn backend.main:app`, then starts Vite. Review that behavior before using it in a shared environment:
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/health` | Service health status check |
-| GET | `/api/dashboard` | Dashboard metrics, opportunities, and audience signals |
-| POST | `/api/analyze` | Triggers multi-agent audience analysis pipeline |
-| GET | `/api/audience` | Classified audience comments and intent distribution |
-| GET | `/api/opportunities` | Ranked content opportunities and topic gaps |
-| GET | `/api/opportunities/{id}` | Detailed opportunity evidence report |
-| POST | `/api/opportunities/{id}/generate` | Invokes Content Studio agent to build package |
-| GET | `/api/content-studio` | Latest generated content package |
-| POST | `/api/content-studio/save` | Saves edited title, hook, script, and description |
-| GET | `/api/calendar` | Monthly scheduled content items |
-| GET | `/api/analytics` | Channel performance metrics and AI insights |
-| GET | `/api/settings` | Channel configuration and connection status |
+```bash
+./start.sh
+```
+
+## Operating modes
+
+| Configuration | Result |
+|---|---|
+| No keys | Fully usable demo/fallback pipeline; results are derived from bundled comments/templates. |
+| `YOUTUBE_API_KEY` only | Requests live YouTube top-level comments when the channel resolves; classification, gaps, scoring, and package use rules/templates. |
+| `GROQ_API_KEY` only | Uses fallback comments but asks Groq to classify, detect gaps, rank, and generate copy. |
+| Both keys | Uses live YouTube comments and Groq agents when API calls succeed. |
+
+## Current implementation boundaries
+
+- No authentication, user isolation, rate limiting, server-side authorization, or production deployment configuration exists. CORS allows all origins.
+- The API client is local-host-only; configure `frontend/src/api/client.js` to deploy elsewhere.
+- Analysis is synchronous and overwrites the prior analysis dataset and all content packages. There is no job queue or analysis history.
+- YouTube retrieval does not paginate, does not use `range_type` to filter, and imports only top-level comment threads. Empty/error responses select the fallback dataset.
+- Channel coverage is compared against four static titles, not the selected channel’s actual video catalog.
+- PostgreSQL support is incomplete: route SQL uses SQLite-style `?` parameters and `cursor.lastrowid`, so SQLite is the supported path today.
+- Calendar schedules internal planning events only; it does not upload or publish to YouTube. Analytics is static. Some settings preferences are visual-only.
+- Content package title/tag fields are JSON strings at the database boundary and decoded by `GET /api/content-studio`.
+- UI rendering interpolates API data directly into HTML; treat external comment content as untrusted until output escaping is added.
+
+## Development notes
+
+- Run `npm run build` in `frontend/` to validate the Vite production bundle.
+- Run `python -m compileall backend` to catch Python syntax/import compilation issues.
+- Delete `backend/audienceos.db` only when intentionally resetting persisted local data; startup will recreate and seed it.
+
+## Dependencies
+
+Frontend: Vite 8 and `lucide-static` (with Lucide loaded from CDN in `index.html`).
+Backend: FastAPI, Uvicorn, Pydantic, HTTPX, python-dotenv, Groq SDK, psycopg2-binary, and SQLAlchemy. SQLAlchemy is listed but is not used by the current source.

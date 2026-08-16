@@ -288,6 +288,37 @@ function attachEvents() {
     overlay.classList.remove('active');
   });
 
+  // Audience filter tabs and search
+  const audienceSearch = document.getElementById("audience-search");
+  const audienceTabs = document.querySelectorAll("[data-audience-filter]");
+  const audienceRows = document.querySelectorAll(".audience-comment");
+  const audienceEmpty = document.getElementById("audience-empty");
+  if (audienceRows.length) {
+    let activeAudienceFilter = "all";
+    const applyAudienceFilters = () => {
+      const query = (audienceSearch?.value || "").trim().toLowerCase();
+      let visible = 0;
+      audienceRows.forEach((row) => {
+        const matchesType = activeAudienceFilter === "all" || row.dataset.commentType === activeAudienceFilter;
+        const matchesQuery = !query || row.dataset.commentSearch.includes(query);
+        const show = matchesType && matchesQuery;
+        row.hidden = !show;
+        if (show) visible += 1;
+      });
+      if (audienceEmpty) audienceEmpty.hidden = visible > 0;
+    };
+    audienceTabs.forEach((tab) => tab.addEventListener("click", () => {
+      activeAudienceFilter = tab.dataset.audienceFilter;
+      audienceTabs.forEach((item) => {
+        const selected = item === tab;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", String(selected));
+      });
+      applyAudienceFilters();
+    }));
+    audienceSearch?.addEventListener("input", applyAudienceFilters);
+  }
+
   // Dashboard "Run Live Analysis" button
   const runLiveBtn = document.getElementById('btn-run-live-analysis');
   if (runLiveBtn) {

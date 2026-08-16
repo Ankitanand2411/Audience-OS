@@ -243,3 +243,16 @@
 .generating-overlay.active{opacity:1;pointer-events:auto}
 .generating-card{max-width:400px;width:100%;text-align:center;display:flex;flex-direction:column;align-items:center;gap:var(--space-6)}
 .generating-title{font-size:var(--font-size-2xl);font-weight:var(--font-weight-semibold);color:var(--text-primary)}
+
+/* ---- Dashboard topic demand chart ---- */
+.topic-demand-chart{display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-2) 0}
+.topic-demand-row{display:grid;grid-template-columns:minmax(90px,130px) minmax(80px,1fr) 34px;align-items:center;gap:var(--space-3)}
+.topic-demand-label{font-size:var(--font-size-sm);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topic-demand-track{height:10px;background:var(--bg-primary);border-radius:var(--radius-full);overflow:hidden;border:1px solid var(--border-primary)}
+.topic-demand-bar{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-primary),var(--accent-secondary));transition:width var(--transition-normal)}
+.topic-demand-value{font-size:var(--font-size-sm);font-weight:var(--font-weight-semibold);color:var(--text-primary);font-variant-numeric:tabular-nums;text-align:right}
+
+/* ---- Calendar scheduling ---- */
+.calendar-scheduler{display:grid;grid-template-columns:minmax(0,1fr) 220px auto;gap:var(--space-4);align-items:end}
+.calendar-scheduler-actions{display:flex;gap:var(--space-2);flex-wrap:wrap}
+@media(max-width:900px){.calendar-scheduler{grid-template-columns:1fr}.calendar-scheduler-actions{align-items:flex-start}}

@@ -1,5 +1,26 @@
 import { COMMENTS as DEMO_COMMENTS, AUDIENCE_STATS as DEMO_STATS } from '../data/demo.js';
 
+const FILTERS = [
+  ['all', 'All'],
+  ['question', 'Questions'],
+  ['request', 'Requests'],
+  ['confusion', 'Confusion'],
+  ['feedback', 'Feedback'],
+  ['idea', 'Ideas'],
+];
+
+function commentType(comment) {
+  return (comment.comment_type || comment.type || 'FEEDBACK').toUpperCase();
+}
+
+function badgeClass(type) {
+  if (type === 'REQUEST') return 'accent';
+  if (type === 'CONFUSION') return 'warning';
+  if (type === 'QUESTION') return 'info';
+  if (type === 'IDEA') return 'success';
+  return 'default';
+}
+
 export function renderAudience(apiData) {
   const comments = apiData?.comments || DEMO_COMMENTS;
   const stats = apiData?.stats || DEMO_STATS;
@@ -23,35 +44,38 @@ export function renderAudience(apiData) {
 
     <section class="section">
       <div class="filters-bar">
-        <div class="tabs" style="border:none;margin:0">
-          <button class="tab active" id="tab-all">All</button>
-          <button class="tab" id="tab-questions">Questions</button>
-          <button class="tab" id="tab-requests">Requests</button>
-          <button class="tab" id="tab-confusion">Confusion</button>
-          <button class="tab" id="tab-feedback">Feedback</button>
-          <button class="tab" id="tab-ideas">Ideas</button>
+        <div class="tabs" style="border:none;margin:0" role="tablist" aria-label="Filter audience comments">
+          ${FILTERS.map(([filter, label], index) => `<button class="tab ${index === 0 ? 'active' : ''}" data-audience-filter="${filter}" role="tab" aria-selected="${index === 0}">${label}</button>`).join('')}
         </div>
         <div class="search-input-wrap">
           <i data-lucide="search"></i>
-          <input class="input" type="text" placeholder="Search audience conversations..." id="audience-search" />
+          <input class="input" type="search" placeholder="Search audience conversations..." id="audience-search" aria-label="Search audience conversations" />
         </div>
       </div>
 
-      <div class="card" style="padding:0;overflow:hidden">
-        ${comments.map(c => `
-          <div class="comment-row" style="border-bottom:1px solid var(--border-primary)">
-            <div class="comment-avatar">${c.author_avatar || c.avatar || 'VW'}</div>
-            <div class="comment-body">
-              <p class="comment-text">"${c.text}"</p>
-              <div class="comment-meta">
-                <span class="badge badge-${(c.comment_type || c.type) === 'REQUEST' ? 'accent' : (c.comment_type || c.type) === 'CONFUSION' ? 'warning' : (c.comment_type || c.type) === 'QUESTION' ? 'info' : (c.comment_type || c.type) === 'IDEA' ? 'success' : 'default'}">${c.comment_type || c.type}</span>
-                <span class="badge badge-default">${c.topic}</span>
-                <span class="badge badge-${c.priority === 'High' ? 'error' : c.priority === 'Medium' ? 'warning' : 'default'}">${c.priority} priority</span>
-                <span>${c.time_ago || c.time}</span>
+      <div class="card" style="padding:0;overflow:hidden" id="audience-comment-list">
+        ${comments.map(c => {
+          const type = commentType(c);
+          const searchText = `${c.text || ''} ${c.topic || ''} ${type} ${c.priority || ''}`.toLowerCase();
+          return `
+            <div class="comment-row audience-comment" data-comment-type="${type.toLowerCase()}" data-comment-search="${searchText.replaceAll('"', '&quot;')}" style="border-bottom:1px solid var(--border-primary)">
+              <div class="comment-avatar">${c.author_avatar || c.avatar || 'VW'}</div>
+              <div class="comment-body">
+                <p class="comment-text">"${c.text}"</p>
+                <div class="comment-meta">
+                  <span class="badge badge-${badgeClass(type)}">${type}</span>
+                  <span class="badge badge-default">${c.topic}</span>
+                  <span class="badge badge-${c.priority === 'High' ? 'error' : c.priority === 'Medium' ? 'warning' : 'default'}">${c.priority} priority</span>
+                  <span>${c.time_ago || c.time}</span>
+                </div>
               </div>
-            </div>
-          </div>
-        `).join('')}
+            </div>`;
+        }).join('')}
+        <div id="audience-empty" class="empty-state" hidden>
+          <i data-lucide="search-x" class="empty-state-icon"></i>
+          <div class="empty-state-title">No conversations found</div>
+          <div class="empty-state-desc">Try another category or a different search term.</div>
+        </div>
       </div>
     </section>
   `;

@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
 
 # Ensure backend directory is in path
 sys.path.append(os.path.dirname(__file__))
@@ -300,16 +301,79 @@ def save_content_studio(body: SaveContentRequest):
     conn.close()
     return {"message": "Saved successfully"}
 
+def _latest_content_title(cursor):
+    cursor.execute("SELECT titles, selected_title_index FROM content_packages ORDER BY id DESC LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        return None
+    try:
+        titles = json.loads(row["titles"])
+        if isinstance(titles, str):
+            titles = json.loads(titles)
+        index = min(max(int(row["selected_title_index"] or 0), 0), len(titles) - 1)
+        return titles[index] if titles else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
 @app.get("/api/calendar")
 def get_calendar():
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM calendar_events")
+    cursor.execute("SELECT * FROM calendar_events ORDER BY scheduled_date, id")
     events = [dict(r) for r in cursor.fetchall()]
-
+    latest_title = _latest_content_title(cursor)
     conn.close()
-    return {"events": events}
+    return {"events": events, "latest_content": {"title": latest_title} if latest_title else None}
+
+class ScheduleCalendarRequest(BaseModel):
+    title: str
+    scheduled_date: str
+
+def _save_calendar_event(cursor, title: str, scheduled_at: datetime):
+    cursor.execute("""
+    INSERT INTO calendar_events (day, platform, title, status, event_type, scheduled_date)
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (scheduled_at.day, "YouTube", title.strip(), "Scheduled", "yt", scheduled_at.isoformat(timespec="minutes")))
+    return cursor.lastrowid
+
+@app.post("/api/calendar")
+def schedule_calendar_event(body: ScheduleCalendarRequest):
+    if not body.title.strip():
+        raise HTTPException(status_code=422, detail="A video title is required")
+    try:
+        scheduled_at = datetime.fromisoformat(body.scheduled_date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Use a valid date and time")
+    conn = get_db()
+    cursor = conn.cursor()
+    event_id = _save_calendar_event(cursor, body.title, scheduled_at)
+    conn.commit()
+    conn.close()
+    return {"message": "YouTube video scheduled", "event_id": event_id, "scheduled_date": scheduled_at.isoformat(timespec="minutes")}
+
+class AutoScheduleRequest(BaseModel):
+    title: Optional[str] = None
+
+@app.post("/api/calendar/auto-schedule")
+def auto_schedule_content(body: AutoScheduleRequest):
+    conn = get_db()
+    cursor = conn.cursor()
+    title = (body.title or "").strip() or _latest_content_title(cursor)
+    if not title:
+        conn.close()
+        raise HTTPException(status_code=422, detail="Generate a YouTube content package or enter a title first")
+    candidate = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    for _ in range(60):
+        if candidate.weekday() < 5:
+            cursor.execute("SELECT COUNT(*) FROM calendar_events WHERE scheduled_date LIKE ?", (f"{candidate.date().isoformat()}%",))
+            if cursor.fetchone()[0] == 0:
+                event_id = _save_calendar_event(cursor, title, candidate)
+                conn.commit()
+                conn.close()
+                return {"message": "Scheduled in the next available weekday slot", "event_id": event_id, "scheduled_date": candidate.isoformat(timespec="minutes")}
+        candidate += timedelta(days=1)
+    conn.close()
+    raise HTTPException(status_code=409, detail="No available weekday slot in the next 60 days")
 
 @app.get("/api/analytics")
 def get_analytics():
