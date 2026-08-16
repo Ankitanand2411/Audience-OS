@@ -34,13 +34,13 @@ export function renderOnboarding() {
 
         <div class="onboarding-step" id="onboard-step-3">
           <h1 class="onboarding-title">Analyzing live YouTube comments</h1>
-          <p class="onboarding-desc">Running Groq AI Agents on live audience data...</p>
+          <p class="onboarding-desc">Analyzing recent audience conversations...</p>
           <div class="progress-steps" style="text-align:left;width:100%">
-            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Connected to YouTube Data API</span></div>
+            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Reading recent conversations</span></div>
             <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Importing channel comment threads</span></div>
-            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Running CommentClassifier Agent</span></div>
-            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Running ContentGapDetector Agent</span></div>
-            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Running OpportunityScorer Agent</span></div>
+            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Finding questions and requests</span></div>
+            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Identifying content gaps</span></div>
+            <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Ranking your next opportunities</span></div>
             <div class="progress-step pending"><span class="progress-step-icon">○</span><span class="progress-step-text">Preparing content intelligence dashboard</span></div>
           </div>
         </div>

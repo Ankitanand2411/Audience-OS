@@ -28,7 +28,7 @@ export function renderAudience(apiData) {
   return `
     <div class="page-header">
       <h1 class="page-title">Audience Intelligence</h1>
-      <p class="page-desc">Understand what your audience is asking, requesting, and struggling with (Categorized by Comment Classifier Agent).</p>
+      <p class="page-desc">Understand what your audience is asking, requesting, and struggling with.</p>
     </div>
 
     <section class="section">

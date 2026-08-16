@@ -80,20 +80,20 @@ def get_dashboard():
     top_topics = [dict(r) for r in cursor.fetchall()]
 
     # Real Dynamic Counts
-    cursor.execute("SELECT COUNT(*) FROM comments")
-    total_comments = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) AS count FROM comments")
+    total_comments = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT COUNT(*) FROM topics")
-    total_topics = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) AS count FROM topics")
+    total_topics = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT COUNT(*) FROM opportunities WHERE score >= 80")
-    high_priority = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) AS count FROM opportunities WHERE score >= 80")
+    high_priority = cursor.fetchone()["count"]
 
     conn.close()
 
     kpi = [
-        {"label": "Comments Analyzed", "value": f"{total_comments:,}", "trend": "Live from YouTube API", "up": True, "icon": "message-square"},
-        {"label": "Topics Discovered", "value": str(total_topics), "trend": "Discovered by AI Agent", "up": True, "icon": "layers"},
+        {"label": "Comments Analyzed", "value": f"{total_comments:,}", "trend": "Latest channel scan", "up": True, "icon": "message-square"},
+        {"label": "Topics Discovered", "value": str(total_topics), "trend": "Patterns in audience feedback", "up": True, "icon": "layers"},
         {"label": "Content Gaps", "value": str(max(1, len(top_topics))), "trend": "High priority gaps", "up": None, "icon": "target"},
         {"label": "High-Priority Opportunities", "value": str(high_priority), "trend": "Score >= 80", "up": True, "icon": "trending-up"}
     ]
@@ -123,11 +123,15 @@ def run_full_analysis(range_type: str = Query("Last 30 days"), channel_handle: O
     clean_handle = channel_handle.strip()
     channel_title = clean_handle.lstrip('@').capitalize()
 
-    # Update or insert channel in DB
-    cursor.execute("DELETE FROM channels")
+    # Keep the fixed channel record stable. Upsert prevents concurrent analyses from colliding.
     cursor.execute("""
     INSERT INTO channels (id, name, channel_name, avatar)
     VALUES ('c1', ?, ?, ?)
+    ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        channel_name = EXCLUDED.channel_name,
+        avatar = EXCLUDED.avatar,
+        last_synced = CURRENT_TIMESTAMP
     """, (channel_title, clean_handle, clean_handle[0:2].upper()))
 
     # Fetch live comments from YouTube Data API
@@ -383,8 +387,8 @@ def auto_schedule_content(body: AutoScheduleRequest):
     candidate = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
     for _ in range(60):
         if candidate.weekday() < 5:
-            cursor.execute("SELECT COUNT(*) FROM calendar_events WHERE channel_handle = ? AND scheduled_date LIKE ?", (channel_handle, f"{candidate.date().isoformat()}%"))
-            if cursor.fetchone()[0] == 0:
+            cursor.execute("SELECT COUNT(*) AS count FROM calendar_events WHERE channel_handle = ? AND scheduled_date LIKE ?", (channel_handle, f"{candidate.date().isoformat()}%"))
+            if cursor.fetchone()["count"] == 0:
                 event_id = _save_calendar_event(cursor, conn, channel_handle, title, candidate)
                 conn.commit()
                 conn.close()
@@ -395,19 +399,12 @@ def auto_schedule_content(body: AutoScheduleRequest):
 
 @app.get("/api/analytics")
 def get_analytics():
-    metrics = [
-        {"label": "Total Views", "value": "142.8K", "trend": "+18% vs last month", "up": True},
-        {"label": "Engagement Rate", "value": "8.4%", "trend": "+2.1% vs last month", "up": True},
-        {"label": "New Comments", "value": "1,247", "trend": "+31% vs last month", "up": True},
-        {"label": "Avg. Watch Time", "value": "6m 42s", "trend": "+12% vs last month", "up": True}
-    ]
-
-    ai_insight = {
-        "insight": "AI-agent content is currently outperforming your channel average by 2.4×. Audience interaction around practical tutorials has increased 31% this month.",
-        "recommendation": "Create more practical AI-agent tutorials."
+    # Do not present fabricated performance data as channel analytics.
+    # Verified views, watch time, and engagement require YouTube Analytics OAuth.
+    return {
+        "available": False,
+        "reason": "Connect your channel to display verified performance."
     }
-
-    return {"metrics": metrics, "ai_insight": ai_insight}
 
 @app.get("/api/settings")
 def get_settings():

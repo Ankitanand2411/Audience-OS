@@ -23,7 +23,7 @@ export function renderSettings(channel) {
           </div>
           <div style="flex:1">
             <div style="font-weight:var(--font-weight-semibold);margin-bottom:2px">${channel.channelName || 'No channel connected'}</div>
-            <div style="font-size:var(--font-size-sm);color:var(--text-secondary)">${channel.channelName ? 'Connected · YouTube Data API Active' : 'Enter a channel handle below to connect'}</div>
+            <div style="font-size:var(--font-size-sm);color:var(--text-secondary)">${channel.channelName ? 'Connected · Ready to analyze' : 'Enter a channel handle below to connect'}</div>
           </div>
           <span class="badge ${channel.channelName ? 'badge-success' : 'badge-warning'}">${channel.channelName ? 'Connected' : 'Not Connected'}</span>
         </div>

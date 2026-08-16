@@ -192,9 +192,9 @@ def seed_if_empty():
         conn = get_db()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM channels")
+        cursor.execute("SELECT COUNT(*) AS count FROM channels")
         res = cursor.fetchone()
-        count = res[0] if res else 0
+        count = res["count"] if res else 0
 
         if count == 0:
             cursor.execute("""
@@ -202,9 +202,9 @@ def seed_if_empty():
             VALUES ('c1', 'Ankit', 'AI Engineering Daily', 'A', 1)
             """)
 
-        cursor.execute("SELECT COUNT(*) FROM opportunities")
+        cursor.execute("SELECT COUNT(*) AS count FROM opportunities")
         res = cursor.fetchone()
-        count = res[0] if res else 0
+        count = res["count"] if res else 0
 
         if count == 0:
             opps = [
@@ -223,9 +223,9 @@ def seed_if_empty():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, opps)
 
-        cursor.execute("SELECT COUNT(*) FROM comments")
+        cursor.execute("SELECT COUNT(*) AS count FROM comments")
         res = cursor.fetchone()
-        count = res[0] if res else 0
+        count = res["count"] if res else 0
 
         if count == 0:
             cmts = [
