@@ -31,6 +31,7 @@ let isOnboarded = localStorage.getItem('aos_onboarded') === 'true';
 let sidebarOpen = false;
 let pageStateData = null;
 let isPageLoading = false;
+let shellRendered = false;
 
 // Live channel state — populated from API, replaces all DEMO_CHANNEL usage
 let currentChannel = {
@@ -38,6 +39,33 @@ let currentChannel = {
   channelName: localStorage.getItem('aos_channel_handle') || '',
   avatar: localStorage.getItem('aos_channel_avatar') || 'C',
 };
+
+// ── Simple API cache with TTL ──────────────────────────────
+const _apiCache = {};
+const CACHE_TTL = 30_000; // 30 seconds
+
+function getCached(key) {
+  const entry = _apiCache[key];
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data;
+  return null;
+}
+
+function setCache(key, data) {
+  _apiCache[key] = { data, ts: Date.now() };
+}
+
+function invalidateCache(key) {
+  if (key) delete _apiCache[key];
+  else Object.keys(_apiCache).forEach(k => delete _apiCache[k]);
+}
+
+// ── Scoped Lucide icon replacement ─────────────────────────
+// Only replaces icons within a given container instead of scanning the whole DOM
+function replaceIcons(container) {
+  if (typeof lucide === 'undefined') return;
+  if (!container) { lucide.createIcons(); return; }
+  lucide.createIcons({ root: container });
+}
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -50,38 +78,117 @@ async function navigateTo(page, id) {
   currentPage = page;
   detailId = id || null;
   sidebarOpen = false;
-  isPageLoading = true;
-  render();
-  window.scrollTo(0, 0);
-  pageStateData = await loadPageData(page, id);
+
+  // If shell doesn't exist yet (e.g., coming from onboarding), do a full render
+  if (!shellRendered) {
+    render();
+    return;
+  }
+
+  // Close mobile sidebar without full re-render
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('active');
+
+  // Update active nav item without full re-render
+  updateActiveNav();
+
+  // Show loading skeleton in content area only
+  const contentEl = document.getElementById('page-content');
+  if (contentEl) {
+    contentEl.innerHTML = renderPageLoading();
+  }
+
+  window.scrollTo({ top: 0, behavior: 'instant' });
+
+  // Try cache first
+  const cacheKey = page + (id ? ':' + id : '');
+  const cached = getCached(cacheKey);
+  if (cached) {
+    pageStateData = cached;
+  } else {
+    pageStateData = await loadPageData(page, id);
+    if (pageStateData) setCache(cacheKey, pageStateData);
+  }
+
+  // Sync channel info if dashboard data
+  if (page === 'dashboard' && pageStateData?.channel?.name) {
+    updateChannelState(pageStateData.channel);
+  }
+
+  // Render only the content area
   isPageLoading = false;
-  render();
+  if (contentEl) {
+    contentEl.innerHTML = renderPageContent();
+    replaceIcons(contentEl);
+    attachPageEvents();
+  }
 }
 window._navigate = navigateTo;
 
+function updateChannelState(channelData) {
+  const prev = currentChannel.channelName;
+  currentChannel = {
+    name: channelData.name,
+    channelName: channelData.channel_name || '',
+    avatar: channelData.avatar || channelData.name[0] || 'C',
+  };
+  localStorage.setItem('aos_channel_name', currentChannel.name);
+  localStorage.setItem('aos_channel_handle', currentChannel.channelName);
+  localStorage.setItem('aos_channel_avatar', currentChannel.avatar);
+
+  // Update topbar and sidebar profile in-place if channel changed
+  if (prev !== currentChannel.channelName) {
+    updateShellChannel();
+  }
+}
+
+function updateShellChannel() {
+  const ch = currentChannel;
+  const isConnected = !!ch.channelName;
+
+  // Update topbar status
+  const ytStatus = document.querySelector('.topbar-yt-status span:last-child');
+  if (ytStatus) ytStatus.textContent = isConnected ? ch.channelName + ' Connected' : 'No Channel Connected';
+  const ytDot = document.querySelector('.topbar-yt-dot');
+  if (ytDot) ytDot.style.background = isConnected ? 'var(--color-success)' : 'var(--color-error)';
+  const statusWrap = document.querySelector('.topbar-yt-status');
+  if (statusWrap) statusWrap.style.opacity = isConnected ? 1 : 0.4;
+
+  // Update topbar avatar
+  const topAvatar = document.querySelector('.topbar-avatar');
+  if (topAvatar) { topAvatar.textContent = ch.avatar; topAvatar.title = ch.name; }
+
+  // Update sidebar profile
+  const profileAvatar = document.querySelector('.sidebar-profile-avatar');
+  if (profileAvatar) profileAvatar.textContent = ch.avatar;
+  const profileName = document.querySelector('.sidebar-profile-name');
+  if (profileName) profileName.textContent = ch.name;
+  const profileChannel = document.querySelector('.sidebar-profile-channel');
+  if (profileChannel) profileChannel.textContent = ch.channelName || 'No channel connected';
+}
+
+function updateActiveNav() {
+  document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+    const navId = item.id.replace('nav-', '');
+    item.classList.toggle('active', navId === currentPage);
+  });
+
+  // Update topbar title
+  const titleEl = document.querySelector('.topbar-title');
+  if (titleEl) titleEl.textContent = getPageTitle();
+}
+
 async function loadPageData(page, id) {
   switch (page) {
-    case 'dashboard': {
-      const data = await api.getDashboard();
-      // Sync live channel from API into local state
-      if (data?.channel?.name) {
-        currentChannel = {
-          name: data.channel.name,
-          channelName: data.channel.channel_name || '',
-          avatar: data.channel.avatar || data.channel.name[0] || 'C',
-        };
-        localStorage.setItem('aos_channel_name', currentChannel.name);
-        localStorage.setItem('aos_channel_handle', currentChannel.channelName);
-        localStorage.setItem('aos_channel_avatar', currentChannel.avatar);
-      }
-      return data;
-    }
-    case 'audience':      return await api.getAudience();
+    case 'dashboard':    return await api.getDashboard();
+    case 'audience':     return await api.getAudience();
     case 'opportunities': return await api.getOpportunities();
     case 'opportunity-detail': return await api.getOpportunityDetail(id || 1);
     case 'content-studio': return await api.getContentStudio();
-    case 'calendar':      return await api.getCalendar();
-    case 'analytics':     return await api.getAnalytics();
+    case 'calendar':     return await api.getCalendar();
+    case 'analytics':    return await api.getAnalytics();
     default: return null;
   }
 }
@@ -171,22 +278,15 @@ function renderPageContent() {
   }
 }
 
-function render() {
+// Render the full app shell once, then only swap page content
+function renderShell() {
   const app = document.getElementById('app');
-
-  if (!isOnboarded) {
-    app.innerHTML = renderOnboarding();
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-    attachOnboardingEvents();
-    return;
-  }
-
   app.innerHTML = `
     <div class="app-shell">
       ${renderSidebar()}
       <div class="main-area">
         ${renderTopbar()}
-        <main class="page-content">
+        <main class="page-content" id="page-content">
           ${renderPageContent()}
         </main>
       </div>
@@ -199,9 +299,35 @@ function render() {
       </div>
     </div>
   `;
+  replaceIcons(app);
+  attachShellEvents();
+  attachPageEvents();
+  shellRendered = true;
+}
 
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-  attachEvents();
+function render() {
+  const app = document.getElementById('app');
+
+  if (!isOnboarded) {
+    app.innerHTML = renderOnboarding();
+    replaceIcons(app);
+    attachOnboardingEvents();
+    shellRendered = false;
+    return;
+  }
+
+  if (!shellRendered) {
+    renderShell();
+    return;
+  }
+
+  // Shell already exists — only update the content area
+  const contentEl = document.getElementById('page-content');
+  if (contentEl) {
+    contentEl.innerHTML = renderPageContent();
+    replaceIcons(contentEl);
+    attachPageEvents();
+  }
 }
 
 function attachOnboardingEvents() {
@@ -250,10 +376,13 @@ function attachOnboardingEvents() {
     // Animate progress steps in parallel while we wait for API
     animateSteps('#onboard-step-3 .progress-step', async () => {
       await analysisPromise;
+      invalidateCache();
       isOnboarded = true;
       localStorage.setItem('aos_onboarded', 'true');
       // Load real data then render — currentChannel will be set from API
       pageStateData = await loadPageData('dashboard');
+      if (pageStateData?.channel?.name) updateChannelState(pageStateData.channel);
+      shellRendered = false;
       render();
     });
   });
@@ -283,7 +412,8 @@ function animateSteps(selector, onComplete) {
   }, 700);
 }
 
-function attachEvents() {
+// Shell-level events (sidebar toggle, overlay click) — attached once
+function attachShellEvents() {
   const menuBtn = document.getElementById('mobile-menu-btn');
   const overlay = document.getElementById('sidebar-overlay');
   if (menuBtn) menuBtn.addEventListener('click', () => {
@@ -296,7 +426,10 @@ function attachEvents() {
     document.getElementById('sidebar').classList.remove('open');
     overlay.classList.remove('active');
   });
+}
 
+// Page-level events — reattached only when page content changes
+function attachPageEvents() {
   // Audience filter tabs and search
   const audienceSearch = document.getElementById("audience-search");
   const audienceTabs = document.querySelectorAll("[data-audience-filter]");
@@ -325,7 +458,12 @@ function attachEvents() {
       });
       applyAudienceFilters();
     }));
-    audienceSearch?.addEventListener("input", applyAudienceFilters);
+    // Debounced search
+    let searchTimer;
+    audienceSearch?.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(applyAudienceFilters, 150);
+    });
   }
 
   // Dashboard "Run Live Analysis" button
@@ -342,10 +480,11 @@ function attachEvents() {
 
       runLiveBtn.disabled = true;
       runLiveBtn.innerHTML = '<i data-lucide="loader-2"></i> Fetching Live Comments...';
-      if (typeof lucide !== 'undefined') lucide.createIcons();
+      replaceIcons(runLiveBtn);
       showToast(`Analyzing ${channelHandle}...`);
 
       const result = await api.runAnalysis('Last 30 days', channelHandle);
+      invalidateCache(); // Clear cache after fresh analysis
 
       if (result) {
         showToast(`Analyzed ${result.processed_comments || 0} real comments · ${result.new_opportunities || 0} opportunities found`);
@@ -355,7 +494,14 @@ function attachEvents() {
 
       // Reload dashboard with fresh live data (this also syncs currentChannel)
       pageStateData = await loadPageData('dashboard');
-      render();
+      if (pageStateData?.channel?.name) updateChannelState(pageStateData.channel);
+      setCache('dashboard', pageStateData);
+      const contentEl = document.getElementById('page-content');
+      if (contentEl) {
+        contentEl.innerHTML = renderPageContent();
+        replaceIcons(contentEl);
+        attachPageEvents();
+      }
     });
   }
 
@@ -369,7 +515,9 @@ function attachEvents() {
       reanalyzeBtn.disabled = true;
       reanalyzeBtn.textContent = 'Analyzing...';
       await api.runAnalysis('Last 30 days', handle);
+      invalidateCache();
       pageStateData = await loadPageData('dashboard');
+      if (pageStateData?.channel?.name) updateChannelState(pageStateData.channel);
       showToast(`Channel switched to ${handle} — dashboard updated!`);
       await navigateTo('dashboard');
     });
@@ -413,6 +561,7 @@ window._generateContent = async function(oppId) {
     } else {
       clearInterval(interval);
       await genPromise;
+      invalidateCache('content-studio');
       setTimeout(async () => {
         overlay.classList.remove('active');
         await navigateTo('content-studio');
@@ -428,9 +577,8 @@ function showToast(msg) {
   if (!c) return;
   const t = document.createElement('div');
   t.className = 'toast';
-  t.innerHTML = `<i data-lucide="check-circle" style="width:16px;height:16px;color:var(--color-success)"></i>${msg}`;
+  t.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>${msg}`;
   c.appendChild(t);
-  if (typeof lucide !== 'undefined') lucide.createIcons();
   setTimeout(() => t.remove(), 4000);
 }
 
@@ -439,9 +587,18 @@ function showToast(msg) {
   render();
   if (isOnboarded) {
     isPageLoading = true;
-    render();
+    const contentEl = document.getElementById('page-content');
+    if (contentEl) {
+      contentEl.innerHTML = renderPageLoading();
+    }
     pageStateData = await loadPageData(currentPage);
+    if (pageStateData?.channel?.name) updateChannelState(pageStateData.channel);
+    setCache(currentPage, pageStateData);
     isPageLoading = false;
-    render();
+    if (contentEl) {
+      contentEl.innerHTML = renderPageContent();
+      replaceIcons(contentEl);
+      attachPageEvents();
+    }
   }
 })();
