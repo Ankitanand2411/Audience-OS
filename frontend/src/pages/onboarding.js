@@ -3,8 +3,8 @@ export function renderOnboarding() {
     <div class="onboarding-overlay">
       <div class="onboarding-card">
         <div class="onboarding-step active" id="onboard-step-1">
-          <div>
-            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></svg>
+          <div style="margin-bottom: var(--space-4); display: flex; justify-content: center;">
+            <img src="/logo.png" alt="AudienceOS Logo" width="64" height="64" style="border-radius: 8px;" />
           </div>
           <h1 class="onboarding-title">Welcome to AudienceOS</h1>
           <p class="onboarding-desc">Your audience already tells you what to create. Connect your YouTube channel to discover content opportunities.</p>
