@@ -1,6 +1,10 @@
 import os
 import json
 from typing import Dict, Any, List
+try:
+    from .groq_utils import groq_is_available, note_groq_error, run_groq_completion
+except ImportError:
+    from groq_utils import groq_is_available, note_groq_error, run_groq_completion
 
 class CommentClassifierAgent:
     """
@@ -22,44 +26,47 @@ class CommentClassifierAgent:
             from groq import Groq
             client = Groq(api_key=self.groq_api_key)
 
+            # Only send comment id and text to save tokens
+            payload = [{"id": idx, "text": c.get("text", "")} for idx, c in enumerate(comments)]
+
             system_prompt = """You are an AI Audience Intelligence Agent for YouTube creators.
-Analyze the provided list of audience comments and classify each into:
+Analyze the provided list of comments (each has an 'id' and 'text') and classify each comment into:
 - comment_type: QUESTION, REQUEST, CONFUSION, FEEDBACK, or IDEA
 - topic: The main technology or subject (e.g. AI Agents, MCP, RAG, FastAPI, LangChain, Ollama)
 - priority: High, Medium, or Low
-- author_avatar: 2-letter uppercase initials of author name
 
-Return JSON array with objects matching:
-[
-  {
-    "author_avatar": "SK",
-    "text": "original comment text",
-    "comment_type": "REQUEST",
-    "topic": "AI Agents",
-    "priority": "High",
-    "time_ago": "Recent"
-  }
-]"""
+Return a JSON object with a 'classifications' key containing an array of objects matching:
+{
+  "classifications": [
+    {
+      "id": 0,
+      "comment_type": "REQUEST",
+      "topic": "AI Agents",
+      "priority": "High"
+    }
+  ]
+}"""
 
-            response = client.chat.completions.create(
+            response = run_groq_completion(
+                client,
                 model="llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(comments)}
+                    {"role": "user", "content": json.dumps(payload)}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                max_tokens=1000,
             )
 
             res_content = response.choices[0].message.content
             parsed = json.loads(res_content)
+            if isinstance(parsed, dict) and "classifications" in parsed:
+                return parsed["classifications"]
             if isinstance(parsed, list):
                 return parsed
-            if isinstance(parsed, dict):
-                for k in ["comments", "results", "data"]:
-                    if k in parsed and isinstance(parsed[k], list):
-                        return parsed[k]
             return []
         except Exception as e:
+            note_groq_error(e, model="llama-3.1-8b-instant")
             print(f"[CommentClassifierAgent] Groq API call failed, using fallback: {e}")
             return []
 
@@ -113,12 +120,25 @@ Return JSON array with objects matching:
         }
 
     def process_batch(self, comments: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-        if self.groq_api_key:
-            groq_results = self._call_groq(comments)
-            if groq_results:
-                return groq_results
+        # Pre-populate all comments using rule-based classification
+        results = [
+            self.classify_comment_rule_based(c.get("text", ""), c.get("author", "Creator Viewer"))
+            for c in comments
+        ]
 
-        results = []
-        for c in comments:
-            results.append(self.classify_comment_rule_based(c.get("text", ""), c.get("author", "Creator Viewer")))
+        if self.groq_api_key and groq_is_available():
+            # Cap the number of comments sent to the LLM to avoid daily limit exhaustion
+            max_llm_comments = 25
+            llm_comments = comments[:max_llm_comments]
+            
+            groq_results = self._call_groq(llm_comments)
+            if groq_results:
+                # Merge the LLM classifications into our pre-populated results
+                for item in groq_results:
+                    idx = item.get("id")
+                    if idx is not None and 0 <= idx < len(results):
+                        results[idx]["comment_type"] = item.get("comment_type", results[idx]["comment_type"])
+                        results[idx]["topic"] = item.get("topic", results[idx]["topic"])
+                        results[idx]["priority"] = item.get("priority", results[idx]["priority"])
+
         return results

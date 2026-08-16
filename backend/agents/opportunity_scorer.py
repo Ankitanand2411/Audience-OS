@@ -1,11 +1,16 @@
 import os
 import json
 from typing import List, Dict, Any
+try:
+    from .groq_utils import groq_is_available, note_groq_error, run_groq_completion
+except ImportError:
+    from groq_utils import groq_is_available, note_groq_error, run_groq_completion
 
 class OpportunityScorerAgent:
     """
     Ranks audience demand clusters into priority Content Opportunities (0-100 score).
-    Uses Groq LLM (llama-3.3-70b-versatile) when GROQ_API_KEY is available.
+    Uses deterministic scoring by default. Groq is an optional enhancement,
+    enabled only with GROQ_ENABLE_ANALYSIS=true.
     """
 
     FORMAT_HEURISTICS = {
@@ -24,9 +29,10 @@ class OpportunityScorerAgent:
 
     def __init__(self):
         self.groq_api_key = os.getenv("GROQ_API_KEY_SCORER") or os.getenv("GROQ_API_KEY")
+        self.use_groq = os.getenv("GROQ_ENABLE_ANALYSIS", "false").lower() == "true"
 
     def score_opportunities(self, gap_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if self.groq_api_key:
+        if self.groq_api_key and self.use_groq and groq_is_available():
             groq_opps = self._call_groq_scorer(gap_results)
             if groq_opps:
                 return groq_opps
@@ -127,15 +133,18 @@ Return JSON:
 
 Sort by score descending. Return at most 8 opportunities."""
 
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+            response = run_groq_completion(
+                client,
+                model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.3,
+                max_tokens=700,
             )
 
             res = json.loads(response.choices[0].message.content)
             return res.get("opportunities", [])
         except Exception as e:
+            note_groq_error(e, model="llama-3.1-8b-instant")
             print(f"[OpportunityScorerAgent] Groq API call failed: {e}")
             return []

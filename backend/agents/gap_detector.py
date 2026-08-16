@@ -2,19 +2,25 @@ import os
 import json
 from typing import List, Dict, Any
 from collections import Counter
+try:
+    from .groq_utils import groq_is_available, note_groq_error, run_groq_completion
+except ImportError:
+    from groq_utils import groq_is_available, note_groq_error, run_groq_completion
 
 class ContentGapDetectorAgent:
     """
     Agent that analyzes identified audience topics against existing channel coverage.
     Determines coverage level (Low, Medium, High) and detects content gaps.
-    Uses Groq LLM (llama-3.3-70b-versatile) when GROQ_API_KEY is present.
+    Uses deterministic analysis by default. Groq is an optional enhancement,
+    enabled only with GROQ_ENABLE_ANALYSIS=true.
     """
 
     def __init__(self):
         self.groq_api_key = os.getenv("GROQ_API_KEY_GAP_DETECTOR") or os.getenv("GROQ_API_KEY")
+        self.use_groq = os.getenv("GROQ_ENABLE_ANALYSIS", "false").lower() == "true"
 
     def detect_gaps(self, classified_comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if self.groq_api_key:
+        if self.groq_api_key and self.use_groq and groq_is_available():
             groq_gaps = self._call_groq_detector(classified_comments)
             if groq_gaps:
                 return groq_gaps
@@ -66,7 +72,7 @@ class ContentGapDetectorAgent:
             type_summary = Counter([c.get("comment_type", "FEEDBACK") for c in comments])
 
             comment_samples = []
-            for c in comments[:20]:
+            for c in comments[:12]:
                 comment_samples.append(f"[{c.get('comment_type', '?')}] ({c.get('topic', '?')}) \"{c.get('text', '')[:120]}\"")
 
             prompt = f"""You are a Content Gap Detector Agent for a YouTube creator.
@@ -105,15 +111,18 @@ Return JSON:
 
 Sort by demand score descending. Return at most 8 topics."""
 
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+            response = run_groq_completion(
+                client,
+                model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.3,
+                max_tokens=700,
             )
 
             res = json.loads(response.choices[0].message.content)
             return res.get("gaps", [])
         except Exception as e:
+            note_groq_error(e, model="llama-3.1-8b-instant")
             print(f"[ContentGapDetectorAgent] Groq API call failed: {e}")
             return []

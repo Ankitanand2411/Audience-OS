@@ -1,6 +1,10 @@
 import os
 import json
 from typing import Dict, Any, List, Optional
+try:
+    from .groq_utils import groq_is_available, note_groq_error, run_groq_completion
+except ImportError:
+    from groq_utils import groq_is_available, note_groq_error, run_groq_completion
 
 class ContentStudioAgent:
     """
@@ -32,7 +36,7 @@ class ContentStudioAgent:
         """Generate a full content package. Prefers Groq LLM; falls back to a
         richer template engine when no API key is available."""
 
-        if self.groq_api_key:
+        if self.groq_api_key and groq_is_available():
             groq_pkg = self._call_groq_generator(
                 opportunity_title,
                 opportunity_desc,
@@ -77,7 +81,7 @@ class ContentStudioAgent:
             # Build a rich, audience-aware comment block
             comment_block = ""
             if comments:
-                top_comments = comments[:15]
+                top_comments = comments[:8]
                 formatted = []
                 for c in top_comments:
                     ctype = c.get("comment_type", c.get("type", ""))
@@ -123,7 +127,7 @@ Create a COMPLETE, production-ready YouTube content package. This must feel like
 - Include a "stay until the end" promise.
 - 3–5 sentences maximum. Written in first person, conversational tone.
 
-### 3. SCRIPT (full video script, 1500–2500 words)
+### 3. SCRIPT (full video script, 800–1200 words)
 - Write the ACTUAL script the creator would read/follow, not an outline.
 - Use clear section headers with timestamps: # Introduction (0:00), # Section Name (2:30), etc.
 - Each section must have:
@@ -176,12 +180,13 @@ Return ONLY a valid JSON object with these exact keys:
   "status": "ready"
 }}"""
 
-            response = client.chat.completions.create(
+            response = run_groq_completion(
+                client,
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.7,
-                max_tokens=4096,
+                max_tokens=2200,
             )
 
             res = json.loads(response.choices[0].message.content)
@@ -196,6 +201,7 @@ Return ONLY a valid JSON object with these exact keys:
             return res
 
         except Exception as e:
+            note_groq_error(e, model="llama-3.3-70b-versatile")
             print(f"[ContentStudioAgent] Groq API call failed: {e}")
             return None
 
