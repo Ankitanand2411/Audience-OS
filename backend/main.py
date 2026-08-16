@@ -62,34 +62,59 @@ def get_dashboard():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Channel info
-    cursor.execute("SELECT * FROM channels LIMIT 1")
-    channel_row = cursor.fetchone()
-    channel = dict(channel_row) if channel_row else {"name": "Creator", "channel_name": "@MKBHD"}
+    is_pg = getattr(conn, "is_postgres", False)
 
-    # Opportunities
-    cursor.execute("SELECT * FROM opportunities ORDER BY score DESC LIMIT 5")
-    opps = [dict(r) for r in cursor.fetchall()]
+    if is_pg:
+        # Single query returns aggregated JSON to minimize network latency to distant databases
+        cursor.execute("""
+        SELECT json_build_object(
+          'channel', (SELECT json_agg(t) FROM (SELECT * FROM channels LIMIT 1) t),
+          'opportunities', (SELECT json_agg(t) FROM (SELECT * FROM opportunities ORDER BY score DESC LIMIT 5) t),
+          'recent_comments', (SELECT json_agg(t) FROM (SELECT * FROM comments ORDER BY id DESC LIMIT 5) t),
+          'top_topics', (SELECT json_agg(t) FROM (SELECT * FROM topics ORDER BY opportunity DESC LIMIT 5) t),
+          'total_comments', (SELECT COUNT(*) FROM comments),
+          'total_topics', (SELECT COUNT(*) FROM topics),
+          'high_priority', (SELECT COUNT(*) FROM opportunities WHERE score >= 80)
+        ) AS dashboard_data;
+        """)
+        res = cursor.fetchone()
+        conn.close()
 
-    # Recent Comments
-    cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 5")
-    comments = [dict(r) for r in cursor.fetchall()]
+        data = res["dashboard_data"] if isinstance(res, dict) else res[0]
+        channel_list = data.get("channel") or []
+        channel = channel_list[0] if channel_list else {"name": "Creator", "channel_name": "@MKBHD"}
+        opps = data.get("opportunities") or []
+        comments = data.get("recent_comments") or []
+        top_topics = data.get("top_topics") or []
+        total_comments = data.get("total_comments") or 0
+        total_topics = data.get("total_topics") or 0
+        high_priority = data.get("high_priority") or 0
+    else:
+        # Local SQLite is extremely fast (under 1ms) so sequential queries are perfectly fine
+        cursor.execute("SELECT * FROM channels LIMIT 1")
+        channel_row = cursor.fetchone()
+        channel = dict(channel_row) if channel_row else {"name": "Creator", "channel_name": "@MKBHD"}
 
-    # Topics
-    cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC LIMIT 5")
-    top_topics = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM opportunities ORDER BY score DESC LIMIT 5")
+        opps = [dict(r) for r in cursor.fetchall()]
 
-    # Real Dynamic Counts
-    cursor.execute("SELECT COUNT(*) AS count FROM comments")
-    total_comments = cursor.fetchone()["count"]
+        cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 5")
+        comments = [dict(r) for r in cursor.fetchall()]
 
-    cursor.execute("SELECT COUNT(*) AS count FROM topics")
-    total_topics = cursor.fetchone()["count"]
+        cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC LIMIT 5")
+        top_topics = [dict(r) for r in cursor.fetchall()]
 
-    cursor.execute("SELECT COUNT(*) AS count FROM opportunities WHERE score >= 80")
-    high_priority = cursor.fetchone()["count"]
-
-    conn.close()
+        cursor.execute("""
+        SELECT 
+            (SELECT COUNT(*) FROM comments) AS total_comments,
+            (SELECT COUNT(*) FROM topics) AS total_topics,
+            (SELECT COUNT(*) FROM opportunities WHERE score >= 80) AS high_priority
+        """)
+        counts_row = cursor.fetchone()
+        total_comments = counts_row["total_comments"] if counts_row else 0
+        total_topics = counts_row["total_topics"] if counts_row else 0
+        high_priority = counts_row["high_priority"] if counts_row else 0
+        conn.close()
 
     kpi = [
         {"label": "Comments Analyzed", "value": f"{total_comments:,}", "trend": "Latest channel scan", "up": True, "icon": "message-square"},
@@ -199,13 +224,28 @@ def get_opportunities():
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM opportunities ORDER BY score DESC")
-    opps = [dict(r) for r in cursor.fetchall()]
+    is_pg = getattr(conn, "is_postgres", False)
 
-    cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC")
-    topics = [dict(r) for r in cursor.fetchall()]
+    if is_pg:
+        cursor.execute("""
+        SELECT json_build_object(
+          'opportunities', (SELECT json_agg(t) FROM (SELECT * FROM opportunities ORDER BY score DESC) t),
+          'topics', (SELECT json_agg(t) FROM (SELECT * FROM topics ORDER BY opportunity DESC) t)
+        ) AS opportunities_data;
+        """)
+        res = cursor.fetchone()
+        conn.close()
+        data = res["opportunities_data"] if isinstance(res, dict) else res[0]
+        opps = data.get("opportunities") or []
+        topics = data.get("topics") or []
+    else:
+        cursor.execute("SELECT * FROM opportunities ORDER BY score DESC")
+        opps = [dict(r) for r in cursor.fetchall()]
 
-    conn.close()
+        cursor.execute("SELECT * FROM topics ORDER BY opportunity DESC")
+        topics = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
     return {"opportunities": opps, "topics": topics}
 
 @app.get("/api/opportunities/{opp_id}")
@@ -213,18 +253,40 @@ def get_opportunity_detail(opp_id: int):
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,))
-    row = cursor.fetchone()
-    if not row:
+    is_pg = getattr(conn, "is_postgres", False)
+
+    if is_pg:
+        cursor.execute("""
+        SELECT json_build_object(
+          'opportunity', (SELECT json_build_object(
+              'id', o.id, 'title', o.title, 'description', o.description, 'score', o.score,
+              'questions', o.questions, 'growth', o.growth, 'coverage', o.coverage,
+              'format', o.format, 'trending', o.trending, 'created_at', o.created_at
+          ) FROM opportunities o WHERE o.id = %s),
+          'comments', (SELECT json_agg(c) FROM (SELECT * FROM comments ORDER BY id DESC LIMIT 5) c)
+        ) AS detail_data;
+        """, (opp_id,))
+        res = cursor.fetchone()
         conn.close()
-        raise HTTPException(status_code=404, detail="Opportunity not found")
+        data = res["detail_data"] if isinstance(res, dict) else res[0]
+        opp = data.get("opportunity")
+        # In postgres, if opportunity not found, the inner json_build_object subquery returns NULL
+        if not opp or opp.get("id") is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        comments = data.get("comments") or []
+    else:
+        cursor.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Opportunity not found")
 
-    opp = dict(row)
+        opp = dict(row)
 
-    cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 5")
-    comments = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 5")
+        comments = [dict(r) for r in cursor.fetchall()]
+        conn.close()
 
-    conn.close()
     return {"opportunity": opp, "comments": comments}
 
 @app.post("/api/opportunities/{opp_id}/generate")

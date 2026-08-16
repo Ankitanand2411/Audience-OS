@@ -94,17 +94,19 @@ async function navigateTo(page, id) {
   // Update active nav item without full re-render
   updateActiveNav();
 
-  // Show loading skeleton in content area only
+  // Try cache first
+  const cacheKey = page + (id ? ':' + id : '');
+  const cached = getCached(cacheKey);
+
+  // Show loading skeleton in content area only if not cached
   const contentEl = document.getElementById('page-content');
-  if (contentEl) {
+  if (contentEl && !cached) {
     contentEl.innerHTML = renderPageLoading();
+    replaceIcons(contentEl);
   }
 
   window.scrollTo({ top: 0, behavior: 'instant' });
 
-  // Try cache first
-  const cacheKey = page + (id ? ':' + id : '');
-  const cached = getCached(cacheKey);
   if (cached) {
     pageStateData = cached;
   } else {

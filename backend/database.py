@@ -26,16 +26,54 @@ class PostgresCursor:
         return getattr(self._cursor, name)
 
 
+import threading
+
+_db_pool = None
+_pool_lock = threading.Lock()
+
+def get_pool():
+    global _db_pool
+    if _db_pool is None:
+        with _pool_lock:
+            if _db_pool is None:
+                if DATABASE_URL and DATABASE_URL.startswith("postgres"):
+                    try:
+                        from psycopg2.pool import ThreadedConnectionPool
+                        url = DATABASE_URL.replace("postgres://", "postgresql://")
+                        _db_pool = ThreadedConnectionPool(1, 20, url, connect_timeout=10)
+                    except Exception as e:
+                        print(f"[Database Pool Error] Failed to create pool: {e}")
+    return _db_pool
+
 class PostgresConnection:
     """Expose a sqlite-like cursor interface to the rest of the application."""
 
     is_postgres = True
 
-    def __init__(self, connection):
+    def __init__(self, connection, pool=None):
         self._connection = connection
+        self._pool = pool
 
     def cursor(self, *args, **kwargs):
         return PostgresCursor(self._connection.cursor(*args, **kwargs))
+
+    def commit(self):
+        self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
+
+    def close(self):
+        if self._pool:
+            try:
+                self._pool.putconn(self._connection)
+            except Exception:
+                try:
+                    self._connection.close()
+                except Exception:
+                    pass
+        else:
+            self._connection.close()
 
     def __getattr__(self, name):
         return getattr(self._connection, name)
@@ -54,14 +92,18 @@ def last_insert_id(cursor, conn) -> int:
 
 def get_db():
     if DATABASE_URL and DATABASE_URL.startswith("postgres"):
-        try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-            url = DATABASE_URL.replace("postgres://", "postgresql://")
-            conn = psycopg2.connect(url, cursor_factory=RealDictCursor, connect_timeout=10)
-            return PostgresConnection(conn)
-        except Exception as e:
-            raise RuntimeError(f"Could not connect to DATABASE_URL: {e}") from e
+        pool = get_pool()
+        if pool:
+            try:
+                conn = pool.getconn()
+                if conn.closed:
+                    pool.putconn(conn, close=True)
+                    conn = pool.getconn()
+                from psycopg2.extras import RealDictCursor
+                conn.cursor_factory = RealDictCursor
+                return PostgresConnection(conn, pool)
+            except Exception as e:
+                raise RuntimeError(f"Could not connect to DATABASE_URL: {e}") from e
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
