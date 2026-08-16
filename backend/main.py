@@ -209,11 +209,11 @@ def get_audience():
     comments = [dict(r) for r in cursor.fetchall()]
 
     stats = [
-        {"label": "Questions", "count": str(len([c for c in comments if c['comment_type'] == 'QUESTION']) + 1280), "color": "info"},
-        {"label": "Requests", "count": str(len([c for c in comments if c['comment_type'] == 'REQUEST']) + 738), "color": "accent"},
-        {"label": "Confusion", "count": str(len([c for c in comments if c['comment_type'] == 'CONFUSION']) + 388), "color": "warning"},
-        {"label": "Feedback", "count": str(len([c for c in comments if c['comment_type'] == 'FEEDBACK']) + 283), "color": "success"},
-        {"label": "Ideas", "count": str(len([c for c in comments if c['comment_type'] == 'IDEA']) + 177), "color": "default"},
+        {"label": "Questions", "count": str(len([c for c in comments if c['comment_type'] == 'QUESTION'])), "color": "info"},
+        {"label": "Requests", "count": str(len([c for c in comments if c['comment_type'] == 'REQUEST'])), "color": "accent"},
+        {"label": "Confusion", "count": str(len([c for c in comments if c['comment_type'] == 'CONFUSION'])), "color": "warning"},
+        {"label": "Feedback", "count": str(len([c for c in comments if c['comment_type'] == 'FEEDBACK'])), "color": "success"},
+        {"label": "Ideas", "count": str(len([c for c in comments if c['comment_type'] == 'IDEA'])), "color": "default"},
     ]
 
     conn.close()

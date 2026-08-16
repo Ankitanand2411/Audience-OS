@@ -23,9 +23,17 @@ class ContentGapDetectorAgent:
         if self.groq_api_key and self.use_groq and groq_is_available():
             groq_gaps = self._call_groq_detector(classified_comments)
             if groq_gaps:
-                return groq_gaps
+                invalid_topics = {"general", "none", "unknown", "n/a", "", "other", "others", "null"}
+                return [
+                    g for g in groq_gaps
+                    if g.get("name") and str(g["name"]).strip().lower() not in invalid_topics
+                ]
 
-        topic_counts = Counter([c["topic"] for c in classified_comments if c.get("topic") and c["topic"] != "General"])
+        invalid_topics = {"general", "none", "unknown", "n/a", "", "other", "others", "null"}
+        topic_counts = Counter([
+            str(c["topic"]).strip() for c in classified_comments
+            if c.get("topic") and str(c["topic"]).strip().lower() not in invalid_topics
+        ])
 
         if not topic_counts:
             return []

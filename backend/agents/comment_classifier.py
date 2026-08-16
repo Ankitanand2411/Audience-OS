@@ -138,7 +138,11 @@ Return a JSON object with a 'classifications' key containing an array of objects
                     idx = item.get("id")
                     if idx is not None and 0 <= idx < len(results):
                         results[idx]["comment_type"] = item.get("comment_type", results[idx]["comment_type"])
-                        results[idx]["topic"] = item.get("topic", results[idx]["topic"])
+                        topic_val = item.get("topic")
+                        if topic_val and str(topic_val).strip().lower() not in ["none", "general", "unknown", "n/a", "", "other", "others", "null"]:
+                            results[idx]["topic"] = str(topic_val).strip()
+                        else:
+                            results[idx]["topic"] = "General"
                         results[idx]["priority"] = item.get("priority", results[idx]["priority"])
 
         return results
