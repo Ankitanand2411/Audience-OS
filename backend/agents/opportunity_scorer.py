@@ -8,21 +8,18 @@ class OpportunityScorerAgent:
     Uses Groq LLM (llama-3.3-70b-versatile) when GROQ_API_KEY is available.
     """
 
-    FORMAT_MAP = {
-        "AI Agents": "YouTube Short",
-        "MCP": "Long-form Tutorial",
-        "RAG": "Deep Dive Video",
-        "FastAPI": "Tutorial Series",
-        "Ollama": "How-to Video",
-        "LangChain": "Comprehensive Guide"
-    }
-
-    DESC_MAP = {
-        "AI Agents": "Your audience repeatedly asks for a clear explanation of how AI agents differ from traditional LLM applications like ChatGPT.",
-        "MCP": "Multiple viewers are requesting a step-by-step walkthrough of the Model Context Protocol and how to build custom MCP servers.",
-        "RAG": "Audience members are confused about chunking strategies, embedding selection, and retrieval optimization in RAG systems.",
-        "FastAPI": "Growing demand for a practical guide on integrating LangChain agents with FastAPI for production deployments.",
-        "Ollama": "Viewers want to know how to run LLMs locally with Ollama, vLLM, and llama.cpp for development and privacy."
+    FORMAT_HEURISTICS = {
+        "short": "YouTube Short",
+        "quick": "YouTube Short",
+        "guide": "Comprehensive Guide",
+        "tutorial": "Long-form Tutorial",
+        "how": "How-to Video",
+        "deep": "Deep Dive Video",
+        "series": "Tutorial Series",
+        "comparison": "Comparison Video",
+        "vs": "Comparison Video",
+        "review": "Review Video",
+        "best": "Listicle Video",
     }
 
     def __init__(self):
@@ -40,25 +37,50 @@ class OpportunityScorerAgent:
             raw_score = int(gap["demand"] * 0.8 + gap.get("count", 1) * 4 - cov_penalty)
             final_score = max(50, min(99, raw_score))
 
-            title_prefix = f"{gap['name']} Guide"
-            if gap['name'] == 'AI Agents':
-                title_prefix = "AI Agents vs ChatGPT"
-            elif gap['name'] == 'MCP':
-                title_prefix = "Complete MCP Tutorial"
-            elif gap['name'] == 'RAG':
-                title_prefix = "RAG Pipeline Best Practices"
+            topic_name = gap.get("name", "Unknown Topic")
+            coverage = gap.get("coverage", "Low")
 
-            desc = self.DESC_MAP.get(gap['name'], f"High demand detected for {gap['name']} with {gap['coverage'].lower()} existing channel coverage.")
+            # Generate a meaningful description based on coverage level
+            if coverage == "Low":
+                desc = (
+                    f"Your audience is actively asking about {topic_name} but your channel "
+                    f"has no dedicated content on this yet. With {gap.get('interactions', 0)} "
+                    f"audience interactions and {gap.get('growth', '+0%')} mention growth, "
+                    f"this is a high-priority gap to fill."
+                )
+            elif coverage == "Medium":
+                desc = (
+                    f"You've touched on {topic_name} before, but your audience wants "
+                    f"more depth. {gap.get('interactions', 0)} recent interactions show "
+                    f"growing demand for a comprehensive breakdown."
+                )
+            else:
+                desc = (
+                    f"While you've covered {topic_name}, audience comments indicate "
+                    f"ongoing confusion and unanswered questions. A follow-up or FAQ-style "
+                    f"video could address remaining pain points."
+                )
+
+            # Determine format from topic name heuristics
+            fmt = "Video Tutorial"
+            topic_lower = topic_name.lower()
+            for keyword, format_name in self.FORMAT_HEURISTICS.items():
+                if keyword in topic_lower:
+                    fmt = format_name
+                    break
+            # High score + low coverage → Short can work for virality
+            if final_score >= 90 and coverage == "Low":
+                fmt = "YouTube Short + Long-form Tutorial"
 
             opportunities.append({
                 "id": idx,
-                "title": title_prefix,
+                "title": topic_name,
                 "description": desc,
                 "score": final_score,
-                "questions": gap["interactions"] - 10,
-                "growth": gap["growth"],
-                "coverage": gap["coverage"],
-                "format": self.FORMAT_MAP.get(gap['name'], "Video Tutorial"),
+                "questions": max(1, gap.get("interactions", 10) - 5),
+                "growth": gap.get("growth", "+0%"),
+                "coverage": coverage,
+                "format": fmt,
                 "trending": 1 if final_score >= 85 else 0
             })
 
@@ -70,17 +92,29 @@ class OpportunityScorerAgent:
             from groq import Groq
             client = Groq(api_key=self.groq_api_key)
 
-            prompt = f"""You are an Opportunity Scorer Agent.
-Given these audience content gaps:
-{json.dumps(gaps)}
+            prompt = f"""You are an Opportunity Scorer Agent for a YouTube content creator.
 
-Rank and generate Content Opportunities JSON:
+Given these audience content gaps detected from real YouTube comments:
+{json.dumps(gaps, indent=2)}
+
+For each gap, create a scored Content Opportunity:
+
+1. **title**: A clear, specific topic title (not a video title — e.g. "RAG Pipeline Optimization" not "How to Build RAG")
+2. **description**: ONE compelling sentence explaining why this is an opportunity, referencing the audience demand data (interactions, growth, coverage). Be specific, not generic.
+3. **score**: 0-100 opportunity score. High demand + Low coverage = high score. High demand + High coverage = medium score.
+4. **questions**: The number of audience questions/interactions on this topic
+5. **growth**: Trend percentage (e.g. "+34%")
+6. **coverage**: "Low", "Medium", or "High" — how well the creator currently covers this
+7. **format**: Best content format for this topic: "YouTube Short", "Long-form Tutorial", "Deep Dive Video", "How-to Video", "Tutorial Series", "Comparison Video", or "Comprehensive Guide"
+8. **trending**: 1 if score >= 85, else 0
+
+Return JSON:
 {{
   "opportunities": [
     {{
       "id": 1,
-      "title": "Clear Actionable Title",
-      "description": "One sentence explaining audience demand and opportunity",
+      "title": "Topic Name",
+      "description": "One sentence explaining the opportunity",
       "score": 96,
       "questions": 127,
       "growth": "+34%",
@@ -89,12 +123,15 @@ Rank and generate Content Opportunities JSON:
       "trending": 1
     }}
   ]
-}}"""
+}}
+
+Sort by score descending. Return at most 8 opportunities."""
 
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=0.3,
             )
 
             res = json.loads(response.choices[0].message.content)

@@ -10,13 +10,6 @@ class ContentGapDetectorAgent:
     Uses Groq LLM (llama-3.3-70b-versatile) when GROQ_API_KEY is present.
     """
 
-    EXISTING_CHANNEL_VIDEOS = [
-        "Getting Started with LangChain",
-        "Prompt Engineering 101",
-        "Vector Databases Explained",
-        "FastAPI Quickstart"
-    ]
-
     def __init__(self):
         self.groq_api_key = os.getenv("GROQ_API_KEY_GAP_DETECTOR") or os.getenv("GROQ_API_KEY")
 
@@ -26,30 +19,41 @@ class ContentGapDetectorAgent:
             if groq_gaps:
                 return groq_gaps
 
-        topic_counts = Counter([c["topic"] for c in classified_comments if c["topic"] != "General"])
+        topic_counts = Counter([c["topic"] for c in classified_comments if c.get("topic") and c["topic"] != "General"])
+
+        if not topic_counts:
+            return []
 
         results = []
+        max_count = max(topic_counts.values())
+
         for topic, count in topic_counts.most_common():
-            matching_videos = [v for v in self.EXISTING_CHANNEL_VIDEOS if topic.lower() in v.lower()]
-            if not matching_videos:
+            # Without an actual video list, estimate coverage from comment types
+            # Topics with lots of CONFUSION/QUESTION comments → Low coverage
+            topic_comments = [c for c in classified_comments if c.get("topic") == topic]
+            confusion_ratio = len([c for c in topic_comments if c.get("comment_type") in ("CONFUSION", "QUESTION")]) / max(len(topic_comments), 1)
+
+            if confusion_ratio > 0.6:
                 coverage = "Low"
-            elif len(matching_videos) == 1:
+            elif confusion_ratio > 0.3:
                 coverage = "Medium"
             else:
                 coverage = "High"
 
-            demand_score = min(98, 50 + count * 8)
-            growth_pct = f"+{10 + count * 5}%"
+            # Demand score: weighted by count relative to max, with a floor
+            demand_score = min(98, int(55 + (count / max(max_count, 1)) * 40 + len(topic_comments) * 2))
+            growth_pct = f"+{min(50, 8 + count * 6)}%"
 
             results.append({
                 "name": topic,
-                "interactions": count * 15 + 20,
+                "interactions": count * 12 + len(topic_comments) * 3,
                 "growth": growth_pct,
                 "demand": demand_score,
                 "coverage": coverage,
                 "count": count
             })
 
+        results.sort(key=lambda x: x["demand"], reverse=True)
         return results
 
     def _call_groq_detector(self, comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -57,15 +61,35 @@ class ContentGapDetectorAgent:
             from groq import Groq
             client = Groq(api_key=self.groq_api_key)
 
-            prompt = f"""You are a Content Gap Detector Agent.
-Given these classified audience comments:
-{json.dumps(comments)}
+            # Summarize comments for a more focused prompt
+            topic_summary = Counter([c.get("topic", "General") for c in comments if c.get("topic") != "General"])
+            type_summary = Counter([c.get("comment_type", "FEEDBACK") for c in comments])
 
-And existing channel video titles:
-{json.dumps(self.EXISTING_CHANNEL_VIDEOS)}
+            comment_samples = []
+            for c in comments[:20]:
+                comment_samples.append(f"[{c.get('comment_type', '?')}] ({c.get('topic', '?')}) \"{c.get('text', '')[:120]}\"")
 
-Detect topics, interaction volume, growth percentage, demand score (0-100), and existing coverage level ('Low', 'Medium', 'High').
-Return JSON format:
+            prompt = f"""You are a Content Gap Detector Agent for a YouTube creator.
+
+Analyze these audience comments and identify content topics where there is HIGH audience demand but LOW existing channel coverage.
+
+## AUDIENCE COMMENT SAMPLES
+{chr(10).join(comment_samples)}
+
+## TOPIC FREQUENCY
+{json.dumps(dict(topic_summary))}
+
+## COMMENT TYPE DISTRIBUTION
+{json.dumps(dict(type_summary))}
+
+For each topic, evaluate:
+- **interactions**: estimated total engagement volume (realistic number based on comment frequency)
+- **growth**: trend percentage showing how fast this topic is growing (e.g. "+28%")
+- **demand**: score 0-100 based on how urgently the audience wants this content
+- **coverage**: "Low" if the creator clearly hasn't covered this adequately, "Medium" if partially covered, "High" if well covered
+- **count**: number of comments related to this topic
+
+Return JSON:
 {{
   "gaps": [
     {{
@@ -77,12 +101,15 @@ Return JSON format:
       "count": 5
     }}
   ]
-}}"""
+}}
+
+Sort by demand score descending. Return at most 8 topics."""
 
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=0.3,
             )
 
             res = json.loads(response.choices[0].message.content)

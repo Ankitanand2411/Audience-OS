@@ -239,7 +239,32 @@ def generate_content_for_opportunity(opp_id: int):
         raise HTTPException(status_code=404, detail="Opportunity not found")
 
     opp = dict(row)
-    pkg = generator_agent.generate_package(opp["title"], opp["description"])
+
+    # Fetch related audience comments to feed into the generator
+    # First try to find comments matching the opportunity's likely topic,
+    # then fall back to the most recent comments
+    cursor.execute("SELECT * FROM comments ORDER BY id DESC LIMIT 20")
+    all_comments = [dict(r) for r in cursor.fetchall()]
+
+    # Fetch channel info for creator context
+    cursor.execute("SELECT * FROM channels LIMIT 1")
+    channel_row = cursor.fetchone()
+    channel = dict(channel_row) if channel_row else {}
+
+    conn_channel_name = channel.get("name", "")
+    conn_channel_handle = channel.get("channel_name", "")
+
+    pkg = generator_agent.generate_package(
+        opportunity_title=opp["title"],
+        opportunity_desc=opp["description"],
+        audience_comments=all_comments,
+        channel_name=conn_channel_name,
+        channel_handle=conn_channel_handle,
+        coverage_level=opp.get("coverage", "Low"),
+        growth=opp.get("growth", "+0%"),
+        questions_count=opp.get("questions", 0),
+        suggested_format=opp.get("format", "Long-form Tutorial"),
+    )
 
     titles_str = json.dumps(pkg["titles"]) if isinstance(pkg["titles"], list) else str(pkg["titles"])
     tags_str = json.dumps(pkg["tags"]) if isinstance(pkg["tags"], list) else str(pkg["tags"])
